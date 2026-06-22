@@ -1,0 +1,209 @@
+================================================================
+HANGGLIDE — INVENTORY SYSTEM STUDIO SETUP GUIDE
+================================================================
+Generated for: InventoryWindow/LocalScript.client.lua
+================================================================
+
+
+================================================================
+SECTION 1: ReplicatedStorage
+================================================================
+
+--- TemplateSlot (TextButton) ---
+  This is cloned once per unique creature in the inventory.
+
+  Name:                 TemplateSlot
+  Type:                 TextButton
+  Size:                 {0, 120}, {0, 140}   (adjust to taste)
+  BackgroundColor3:     Any default — script overrides with rarity color
+  Visible:              true  (lives in ReplicatedStorage, not on screen)
+
+  CHILDREN OF TemplateSlot:
+
+  [1] ViewportFrame  (no specific name needed — found by class)
+      Size:                 {1, 0}, {0.75, 0}   top 75% of the card
+      Position:             {0, 0}, {0, 0}
+      BackgroundTransparency: 1
+      Add UICorner inside:  CornerRadius {1, 0}  makes it a full circle
+
+  [2] NameLabel  (TextLabel — MUST be named exactly "NameLabel")
+      Name:                 NameLabel
+      Size:                 {1, 0}, {0.25, 0}
+      Position:             {0, 0}, {0.75, 0}
+      TextScaled:           true
+      BackgroundTransparency: 1
+
+  [3] CountLabel  (TextLabel — MUST be named exactly "CountLabel")
+      Name:                 CountLabel
+      Size:                 {0.4, 0}, {0.25, 0}
+      Position:             {0.6, 0}, {0, 0}    top-right corner badge
+      TextScaled:           true
+      BackgroundColor3:     Dark color so badge is readable
+      Visible:              false   (script shows it only when Quantity > 1)
+      Add UICorner inside:  Makes it a pill-shaped badge
+
+
+================================================================
+SECTION 2: StarterGui > InventoryUI (ScreenGui)
+================================================================
+
+  The InventoryUI ScreenGui is already created by Rojo from the
+  folder name. Add the following as DIRECT CHILDREN of InventoryUI:
+
+
+--- BagButton (ImageButton) ---
+  The persistent button always visible on screen that opens the
+  inventory panel.
+
+  Name:             BagButton
+  Type:             ImageButton
+  Size:             {0, 60}, {0, 60}
+  Position:         {0, 16}, {0.5, -30}   (left side, vertically centered)
+  AnchorPoint:      0, 0.5
+  Image:            Your bag icon asset ID
+  ZIndex:           5
+
+
+--- DragProxy (Frame) ---
+  The ghost card that follows the cursor while dragging an inventory
+  item. Must be a SIBLING of MainPanel (NOT inside it) so it renders
+  above all other panels.
+
+  Name:                 DragProxy
+  Type:                 Frame
+  Size:                 {0, 90}, {0, 90}   roughly match TemplateSlot size
+  AnchorPoint:          0.5, 0.5           REQUIRED — centers it on the cursor
+  BackgroundColor3:     Dark semi-transparent color
+  BackgroundTransparency: 0.3
+  ZIndex:               100
+  Visible:              false              (script controls this at runtime)
+  ClipsDescendants:     true
+
+  CHILD OF DragProxy:
+
+  [1] TextLabel  (no specific name needed — found by class)
+      Size:                 {1, 0}, {1, 0}
+      TextScaled:           true
+      BackgroundTransparency: 1
+      TextColor3:           White
+      ZIndex:               101
+
+
+--- MainPanel (Frame) ---
+  The inventory popup panel. Script hides this at startup.
+
+  Name:             MainPanel
+  Type:             Frame
+  Size:             {0, 640}, {0, 480}
+  AnchorPoint:      0.5, 0.5
+  Position:         {0.5, 0}, {0.5, 0}   centered on screen
+  BackgroundColor3: Your panel background color
+  ZIndex:           10
+
+  CHILDREN OF MainPanel:
+
+  [1] CardContainer  (ScrollingFrame)
+      Name:                 CardContainer
+      Size:                 {1, -20}, {0.85, -20}   leaves room for close button
+      CanvasSize:           {0, 0}, {0, 0}
+      ScrollingDirection:   Vertical
+      AutomaticCanvasSize:  Y
+
+      Add a UIGridLayout INSIDE CardContainer:
+          FillDirectionMaxCells:  5
+          SortOrder:              LayoutOrder
+          CellSize:               {0, 120}, {0, 140}   match your TemplateSlot size
+          CellPadding:            {0, 8}, {0, 8}
+
+  [2] CloseButton  (ImageButton)
+      Name:             CloseButton
+      Type:             ImageButton
+      Size:             {0, 36}, {0, 36}
+      Position:         Top-right corner of MainPanel
+      AnchorPoint:      1, 0
+      Image:            A red X icon asset ID
+      ZIndex:           11
+
+
+--- HotbarContainer (Frame) ---
+  The 9-slot hotbar bar. Position anywhere on screen.
+
+  Name:         HotbarContainer
+  Type:         Frame
+  Size:         {0, 520}, {0, 70}
+  Position:     {0.5, -260}, {1, -80}   bottom center example
+
+  CHILDREN OF HotbarContainer:
+  Create 9 Frame children, one per hotbar slot.
+
+  Each slot Frame:
+      Name:             Slot1 through Slot9  (any name is fine)
+      Type:             Frame
+      Size:             {0, 60}, {0, 60}
+      LayoutOrder:      1 through 9          CRITICAL — determines slot order
+      BackgroundColor3: Your slot background color
+
+      CHILDREN OF EACH SLOT FRAME:
+
+      [a] ViewportFrame  (no specific name needed)
+              Size:                 {1, 0}, {0.7, 0}
+              BackgroundTransparency: 1
+
+      [b] TextLabel  (no specific name needed)
+              Size:                 {1, 0}, {0.3, 0}
+              Position:             {0, 0}, {0.7, 0}
+              TextScaled:           true
+              BackgroundTransparency: 1
+
+
+================================================================
+SECTION 3: QUICK CHECKLIST
+================================================================
+
+  ReplicatedStorage:
+  [ ] TemplateSlot (TextButton)
+        [ ] ViewportFrame  (with UICorner CornerRadius {1,0})
+        [ ] NameLabel      (TextLabel, named exactly "NameLabel")
+        [ ] CountLabel     (TextLabel, named exactly "CountLabel", Visible=false)
+
+  StarterGui > InventoryUI:
+  [ ] BagButton      (ImageButton)
+  [ ] DragProxy      (Frame, AnchorPoint 0.5/0.5, ZIndex 100, with one TextLabel)
+  [ ] MainPanel      (Frame)
+        [ ] CardContainer  (ScrollingFrame)
+              [ ] UIGridLayout  (FillDirectionMaxCells=5)
+        [ ] CloseButton    (ImageButton)
+  [ ] HotbarContainer (Frame)
+        [ ] 9x Frame children
+              [ ] LayoutOrder set to 1 through 9 on each
+              [ ] ViewportFrame inside each
+              [ ] TextLabel inside each
+
+
+================================================================
+SECTION 4: NAMING RULES
+================================================================
+
+  The following names are case-sensitive and MUST match exactly:
+
+  Instance            Expected Name
+  ----------------    ------------------
+  ScreenGui           InventoryUI
+  Inventory popup     MainPanel
+  Scrolling grid      CardContainer
+  Grid layout         (any — found by class UIGridLayout)
+  Open button         BagButton
+  Close button        CloseButton
+  Drag ghost          DragProxy
+  Hotbar row          HotbarContainer
+  Template card       TemplateSlot  (in ReplicatedStorage)
+  Name text           NameLabel     (inside TemplateSlot)
+  Count badge         CountLabel    (inside TemplateSlot)
+
+  RemoteEvents expected in ReplicatedStorage:
+      UpdateInventoryClient
+      EquipCreatureClient
+
+================================================================
+END OF GUIDE
+================================================================
