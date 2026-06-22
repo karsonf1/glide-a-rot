@@ -5,7 +5,7 @@ local RunService = game:GetService("RunService")
 local isStudio = RunService:IsStudio()
 local PlayerDataStore = nil
 local dataStoreOk, dataStoreErr = pcall(function()
-	PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V3")
+	PlayerDataStore = DataStoreService:GetDataStore("PlayerData_V4")
 end)
 local canUseDataStore = isStudio and dataStoreOk or not isStudio
 
@@ -44,6 +44,13 @@ function PlayerData.LoadProfile(player)
 	-- Deep-copy the inventory table so defaults aren't shared
 	if data == nil then
 		profile.Data.Inventory = {}
+	end
+
+	-- Migrate any V3 string entries to the V4 rot format.
+	for i, entry in ipairs(profile.Data.Inventory) do
+		if type(entry) == "string" then
+			profile.Data.Inventory[i] = { Species = entry, Rarity = "Common", Income = 1 }
+		end
 	end
 
 	-- Reconcile: ensure any missing keys get default values
@@ -93,41 +100,39 @@ function PlayerData.GetProfile(player)
 	return Profiles[player]
 end
 
-function PlayerData.AddCreatureToInventory(player, creatureInternalName)
+-- rot: { Species: string, Rarity: string, Income: number }
+function PlayerData.AddRotToInventory(player, rot)
 	local profile = Profiles[player]
-	if profile then
-		if #profile.Data.Inventory < 81 then
-			table.insert(profile.Data.Inventory, creatureInternalName)
+	if not profile then return false end
 
-			local updateInventoryEvent = ReplicatedStorage:FindFirstChild("UpdateInventoryClient")
-			if updateInventoryEvent then
-				updateInventoryEvent:FireClient(player, profile.Data.Inventory)
-			end
-			return true
-		else
-			warn(player.Name .. "'s inventory is full!")
-			return false
-		end
+	if #profile.Data.Inventory >= 81 then
+		warn(player.Name .. "'s inventory is full!")
+		return false
 	end
-	return false
+
+	table.insert(profile.Data.Inventory, rot)
+
+	local updateInventoryEvent = ReplicatedStorage:FindFirstChild("UpdateInventoryClient")
+	if updateInventoryEvent then
+		updateInventoryEvent:FireClient(player, profile.Data.Inventory)
+	end
+	return true
 end
 
-function PlayerData.RemoveCreatureFromInventory(player, creatureInternalName)
+-- Removes a rot at a specific inventory index (1-based).
+function PlayerData.RemoveRotFromInventory(player, index)
 	local profile = Profiles[player]
-	if profile then
-		for i, name in ipairs(profile.Data.Inventory) do
-			if name == creatureInternalName then
-				table.remove(profile.Data.Inventory, i)
+	if not profile then return false end
 
-				local updateInventoryEvent = ReplicatedStorage:FindFirstChild("UpdateInventoryClient")
-				if updateInventoryEvent then
-					updateInventoryEvent:FireClient(player, profile.Data.Inventory)
-				end
-				return true
-			end
-		end
+	if not profile.Data.Inventory[index] then return false end
+
+	table.remove(profile.Data.Inventory, index)
+
+	local updateInventoryEvent = ReplicatedStorage:FindFirstChild("UpdateInventoryClient")
+	if updateInventoryEvent then
+		updateInventoryEvent:FireClient(player, profile.Data.Inventory)
 	end
-	return false
+	return true
 end
 
 function PlayerData.AddCoins(player, amount)

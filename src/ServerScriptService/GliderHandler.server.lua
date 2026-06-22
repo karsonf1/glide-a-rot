@@ -1,25 +1,12 @@
--- ============================================================
--- GliderHandler.server.lua  (ServerScriptService)
--- Server-side authoritative handler for glider equip events.
---
--- Responsibilities:
---   1. Validate that the requested glider exists in GliderConfig.
---   2. Set Humanoid.PlatformStand so the server agrees with the client state.
---   3. Transfer / revoke HumanoidRootPart network ownership so the client
---      can drive physics constraints without fighting server authority.
---
--- Listens to: ReplicatedStorage.GliderEquipClient (RemoteEvent)
--- Payload:    (player, isEquipped: boolean, gliderName: string | nil)
--- ============================================================
-
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local GliderConfig       = require(ReplicatedStorage:WaitForChild("GliderConfig"))
-local gliderEquipEvent   = ReplicatedStorage:WaitForChild("GliderEquipClient")
+local GliderConfig     = require(ReplicatedStorage:WaitForChild("GliderConfig"))
+local GameEvents       = require(script.Parent:WaitForChild("GameEvents"))
+local gliderEquipEvent = ReplicatedStorage:WaitForChild("GliderEquipClient")
 
--- Track active sessions for cleanup on PlayerRemoving
-local activeGliders = {}   -- [player] = gliderName or nil
+local activeGliders = {}   -- [player] = gliderName
+local runStarts     = {}   -- [player] = Vector3 launch position
 
 gliderEquipEvent.OnServerEvent:Connect(function(player, isEquipped, gliderName)
 	local char = player.Character
@@ -30,7 +17,6 @@ gliderEquipEvent.OnServerEvent:Connect(function(player, isEquipped, gliderName)
 	if not humanoid or not hrp then return end
 
 	if isEquipped and typeof(gliderName) == "string" then
-		-- Reject unknown glider names to prevent spoofed requests
 		if not GliderConfig.Gliders[gliderName] then
 			warn(("[GliderHandler] %s requested unknown glider '%s' — rejected")
 				:format(player.Name, gliderName))
@@ -38,24 +24,35 @@ gliderEquipEvent.OnServerEvent:Connect(function(player, isEquipped, gliderName)
 		end
 
 		humanoid.PlatformStand = true
-		-- Give the client full ownership of HRP so LinearVelocity / AlignOrientation
-		-- applied from the LocalScript don't lag or conflict with server simulation.
 		hrp:SetNetworkOwner(player)
 
 		activeGliders[player] = gliderName
-		print(("[GliderHandler] %s → airborne on '%s'"):format(player.Name, gliderName))
+		runStarts[player]     = hrp.Position
+
+		print(("[GliderHandler] %s → airborne on '%s' from %s")
+			:format(player.Name, gliderName, tostring(hrp.Position)))
 
 	else
-		-- Stow: restore normal physics authority
 		humanoid.PlatformStand = false
 		hrp:SetNetworkOwnershipAuto()
 
-		activeGliders[player] = nil
-		print(("[GliderHandler] %s → landed"):format(player.Name))
+		local startPos = runStarts[player]
+		if startPos then
+			local endPos = hrp.Position
+			-- Horizontal distance only — vertical travel doesn't represent zone progression.
+			local distance = Vector3.new(endPos.X - startPos.X, 0, endPos.Z - startPos.Z).Magnitude
+			runStarts[player]     = nil
+			activeGliders[player] = nil
+
+			print(("[GliderHandler] %s → landed | distance: %.1f studs"):format(player.Name, distance))
+			GameEvents.RunEnded:Fire(player, distance)
+		else
+			activeGliders[player] = nil
+		end
 	end
 end)
 
--- Clean up if the player leaves mid-flight
 Players.PlayerRemoving:Connect(function(player)
 	activeGliders[player] = nil
+	runStarts[player]     = nil
 end)
