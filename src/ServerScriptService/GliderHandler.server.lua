@@ -56,3 +56,32 @@ Players.PlayerRemoving:Connect(function(player)
 	activeGliders[player] = nil
 	runStarts[player]     = nil
 end)
+
+GameEvents.FuelDepleted:Connect(function(player)
+	-- Guard: run already ended (manual stow beat us here)
+	if runStarts[player] == nil then return end
+
+	local char = player.Character
+	if char then
+		local humanoid = char:FindFirstChildWhichIsA("Humanoid")
+		local hrp      = char:FindFirstChild("HumanoidRootPart")
+		if humanoid then humanoid.PlatformStand = false end
+		if hrp      then hrp:SetNetworkOwnershipAuto() end
+	end
+
+	local startPos = runStarts[player]
+	local distance = 0
+	if char and startPos then
+		local hrp = char:FindFirstChild("HumanoidRootPart")
+		if hrp then
+			local endPos = hrp.Position
+			distance = Vector3.new(endPos.X - startPos.X, 0, endPos.Z - startPos.Z).Magnitude
+		end
+	end
+
+	runStarts[player]     = nil
+	activeGliders[player] = nil
+
+	print(("[GliderHandler] %s → run ended by fuel depletion | distance: %.1f studs"):format(player.Name, distance))
+	GameEvents.RunEnded:Fire(player, distance)
+end)

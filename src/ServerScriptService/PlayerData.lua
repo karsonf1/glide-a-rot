@@ -14,6 +14,7 @@ local Profiles = {}
 local DEFAULT_DATA = {
 	Coins = 500,
 	Inventory = {},
+	Poofs = 0,
 }
 
 local PlayerData = {}
@@ -157,6 +158,41 @@ function PlayerData.SpendCoins(player, amount)
 		return true
 	end
 	return false
+end
+
+function PlayerData.GetPoofs(player)
+	local profile = Profiles[player]
+	if not profile then return 0 end
+	return profile.Data.Poofs or 0
+end
+
+function PlayerData.AwardPoofs(player, amount)
+	local profile = Profiles[player]
+	if not profile then return end
+
+	profile.Data.Poofs = (profile.Data.Poofs or 0) + amount
+	local total = profile.Data.Poofs
+
+	print(("[PlayerData] AwardPoofs → %s +%d Poofs (total: %d)"):format(player.Name, amount, total))
+
+	if canUseDataStore and PlayerDataStore then
+		local success, err = pcall(function()
+			PlayerDataStore:SetAsync("Player_" .. player.UserId, profile.Data)
+		end)
+		if success then
+			print(("[PlayerData] Saved profile for %s after Poofs award"):format(player.Name))
+		else
+			warn(("[PlayerData] Failed to save Poofs for %s: %s"):format(player.Name, tostring(err)))
+		end
+	end
+
+	local poofUpdateEvent = ReplicatedStorage:FindFirstChild("PoofUpdate")
+	if poofUpdateEvent then
+		poofUpdateEvent:FireClient(player, total)
+		print(("[PlayerData] PoofUpdate fired to %s with total %d"):format(player.Name, total))
+	else
+		warn("[PlayerData] PoofUpdate RemoteEvent not found in ReplicatedStorage")
+	end
 end
 
 return PlayerData

@@ -21,7 +21,7 @@ return {
 			ModelName   = "GliderBeginner",  -- must exist in ReplicatedStorage/GliderModels
 
 			-- ── Airspeed ─────────────────────────────────────────────────────
-			MaxSpeed    = 55,     -- studs/sec; total forward airspeed at cruise
+			MaxSpeed    = 80,     -- studs/sec; total forward airspeed at cruise
 
 			-- ── Glide ────────────────────────────────────────────────────────
 			-- GlideAngle: passive nose-down pitch when no W/S is held.

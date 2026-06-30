@@ -526,9 +526,13 @@ local function reconcileInventory(serverArray)
 		if name then hotbarCount[name] = (hotbarCount[name] or 0) + 1 end
 	end
 
+	-- serverArray entries may be plain strings (legacy) or rot objects {Species, Rarity, Income}.
 	local serverCounts = {}
-	for _, name in ipairs(serverArray) do
-		serverCounts[name] = (serverCounts[name] or 0) + 1
+	for _, entry in ipairs(serverArray) do
+		local name = type(entry) == "table" and entry.Species or entry
+		if type(name) == "string" then
+			serverCounts[name] = (serverCounts[name] or 0) + 1
+		end
 	end
 
 	-- Prune hotbar entries whose creature was removed server-side
