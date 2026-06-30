@@ -29,6 +29,11 @@ local CONFIG = {
 	ArmShoulderPitch  = -68,
 	ArmShoulderSpread = 14,
 	ArmElbowBend      = 58,
+	-- Run corridor (ProcGenManager treadmill runs along world +Z).
+	-- The treadmill recycles on +Z progress, so flight must stay forward-biased.
+	YawForwardLock    = true,       -- clamp heading to the +Z run corridor
+	ForwardYaw        = math.pi,    -- yawAngle that maps to +Z travel (Vz = -cos(yaw)*… > 0)
+	MaxYawDeviation   = 75,         -- degrees the player may steer off forward (tune in playtest)
 }
 
 local GliderConfig        = require(ReplicatedStorage:WaitForChild("GliderConfig"))
@@ -234,7 +239,9 @@ local function startFlight(gliderName)
 
 	flightState.active = true; flightState.statsRef = stats
 	flightState.gliderName = gliderName
-	flightState.yawAngle = math.atan2(-lookXZ.X, -lookXZ.Z)
+	-- Forward lock: launch heading down the +Z corridor instead of the spawn facing.
+	flightState.yawAngle = CONFIG.YawForwardLock and CONFIG.ForwardYaw
+		or math.atan2(-lookXZ.X, -lookXZ.Z)
 	flightState.yawRate = 0; flightState.pitch = stats.GlideAngle
 	flightState.roll = 0; flightState.deployY = hrp.Position.Y
 
@@ -300,6 +307,18 @@ local function startFlight(gliderName)
 		local accel = (math.abs(rawYaw) > 0.01) and s.TurnAcceleration or s.TurnDecay
 		flightState.yawRate  += (targetRate - flightState.yawRate) * accel * dt
 		flightState.yawAngle += math.rad(flightState.yawRate) * dt
+
+		-- Forward lock — keep heading within ±MaxYawDeviation of the +Z corridor so the
+		-- treadmill always sees forward progress (|deviation| < 90° ⇒ Vz > 0).
+		if CONFIG.YawForwardLock then
+			local diff = flightState.yawAngle - CONFIG.ForwardYaw
+			diff = (diff + math.pi) % (2 * math.pi) - math.pi   -- wrap to [-π, π]
+			local maxDev = math.rad(CONFIG.MaxYawDeviation)
+			if math.abs(diff) > maxDev then
+				flightState.yawAngle = CONFIG.ForwardYaw + math.clamp(diff, -maxDev, maxDev)
+				flightState.yawRate  = 0                        -- stop pushing into the wall
+			end
+		end
 
 		-- Pitch
 		local pitchTarget

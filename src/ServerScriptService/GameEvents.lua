@@ -10,4 +10,9 @@ GameEvents.RunEnded = Instance.new("BindableEvent")
 -- GliderHandler listens to this and fires RunEnded so it fires exactly once per run.
 GameEvents.FuelDepleted = Instance.new("BindableEvent")
 
+-- Fired by ProcGenManager after a treadmill teleport.
+-- Payload: (player: Player, offset: Vector3)
+-- GliderHandler listens and shifts runStarts[player] so distance stays accurate.
+GameEvents.RunOffsetApplied = Instance.new("BindableEvent")
+
 return GameEvents
