@@ -1,9 +1,9 @@
 # GAR — Live Project State
-_Last updated: 2026-06-29_
+_Last updated: 2026-06-29 (session 2)_
 
 ## Sprint Position
 **Current week:** MVP sprint (5-week target)
-**This week's focus:** Ring system + fuel economy shipped; map design + ring placement next
+**This week's focus:** ProcGen v1 — build Forest segments in Studio, run Code agent handoff, first playtest of infinite treadmill
 
 ## System Status
 
@@ -18,6 +18,7 @@ _Last updated: 2026-06-29_
 | Poofs currency | ✅ done | PlayerData AwardPoofs/GetPoofs; PoofUpdate RemoteEvent; no spend mechanic yet |
 | Glider type system | 🟡 in progress | GliderConfig.lua has Beginner + Advanced stats; server handler tracks runs; models need placing in Studio (GliderModels folder in RS) |
 | Inventory hotbar | 🟡 in progress | EquipmentHandler.server.lua validates equip; InventoryUI exists; rot-to-slot assignment not yet functional |
+| ProcGen v1 | 🟡 in progress | Code agent handoff written (sessions/2026-06-29-procgen-handoff.md); Forest_A/B/C segments not yet built in Studio; see references/forest-segment-authoring.md |
 | Game map | 🟡 in progress | Design planned (see systems/game-map.md); no Studio terrain built yet; ring placement strategy defined |
 | Social rot-rarity mechanic | 🔴 not started | Design decision still open (see open-questions.md) |
 | Passive idle income | 🔴 not started | Rots have Income field; ticker not yet built |
@@ -27,8 +28,7 @@ _Last updated: 2026-06-29_
 Status key: 🔴 not started · 🟡 in progress · ✅ done
 
 ## Current Blocker
-Map needs to be built in Studio — ring placement, terrain, landmarks. Scripting is ahead of
-art/map. Ring VFX client script (consumes RingCollected RemoteEvent) also not yet built.
+ProcGen v1 needs Forest_A/B/C segment Models built in Studio before the Code agent script can be tested. Build segments first (see references/forest-segment-authoring.md), then run the Code agent with sessions/2026-06-29-procgen-handoff.md. Map terrain and ring VFX also still pending.
 
 ## Key File Paths
 ```
@@ -42,6 +42,8 @@ src/ServerScriptService/GameEvents.lua           ← BindableEvent RunEnded
 src/ReplicatedStorage/GliderConfig.lua           ← glider stats registry
 src/ReplicatedStorage/RarityDistribution.lua     ← distance-based rarity roll
 src/ReplicatedStorage/CreatureDictionary.lua     ← creature data (species, weight, income)
+src/ReplicatedStorage/SegmentRegistry.lua        ← procgen segment pool config (CREATE THIS)
+src/ServerScriptService/ProcGenManager.server.lua ← treadmill manager (CREATE THIS)
 src/StarterGui/InventoryUI/                      ← inventory display UI
 src/StarterGui/CrateUI/                          ← crate roll carousel UI
 ```
