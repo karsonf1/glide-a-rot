@@ -33,7 +33,7 @@ local CONFIG = {
 	-- The treadmill recycles on +Z progress, so flight must stay forward-biased.
 	YawForwardLock    = true,       -- clamp heading to the +Z run corridor
 	ForwardYaw        = math.pi,    -- yawAngle that maps to +Z travel (Vz = -cos(yaw)*… > 0)
-	MaxYawDeviation   = 75,         -- degrees the player may steer off forward (tune in playtest)
+	MaxYawDeviation   = 90,         -- max steer off +Z: 90° = full lateral, never past into reverse
 }
 
 local GliderConfig        = require(ReplicatedStorage:WaitForChild("GliderConfig"))
@@ -353,6 +353,9 @@ local function startFlight(gliderName)
 		local targetVz = -math.cos(flightState.yawAngle) * cosPitch * speed
 		flightState.currentVelX += (targetVx - flightState.currentVelX) * CONFIG.AirDrag * dt
 		flightState.currentVelZ += (targetVz - flightState.currentVelZ) * CONFIG.AirDrag * dt
+		-- Hard invariant: never travel backward down the corridor (away from the rings).
+		-- Lateral (yaw = ±90°) yields Vz = 0; anything that would push Vz negative is floored.
+		flightState.currentVelZ = math.max(flightState.currentVelZ, 0)
 
 		local vy = math.sin(pitchRad) * speed - CONFIG.SinkRate
 		if flightState.deployY and hrp.Position.Y >= flightState.deployY - 0.5 then
