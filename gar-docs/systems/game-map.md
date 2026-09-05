@@ -1,173 +1,85 @@
-# Game Map
+<!-- Synced from the Obsidian vault (02 - Glide-A-Rot) on 2026-09-05. gar-docs/ is the in-repo source of truth for engineering docs. -->
 
-_Updated: 2026-06-29 — starter map design added_
+# GAR Game Map
 
-## Goal
+**Status:** 🟡 in progress · lives in `HangglideARot.rbxlx`, not in Rojo
 
-A playable overworld that makes hanggliding feel worth doing repeatedly — varied terrain, clear
-visual landmarks, and ring placement that creates interesting flight decisions. The map needs to
-be buildable by Karson in Studio without requiring advanced terrain skills.
+## Where this stands
 
----
+The map design went through a shift worth understanding. The original plan was a **static hand-built world** — "The Plateau", a mesa launch zone with concentric distance bands mapped to rarity. Then [GAR ProcGen Corridor](proc-gen.md) arrived and the shape changed to a **streamed corridor** of authored 500-stud sections with canyon walls.
 
-## Starter Map Concept: "The Plateau"
+The plateau concept isn't dead — it's the right model for a launch/hub area and for the *feel* the corridor should evoke. But the corridor is what actually generates the run. Read the plateau material below as design intent and ring-placement theory, not as a build spec.
 
-A single mesa/plateau as the launch zone, with terrain that steps down in elevation as you glide
-outward. Players launch off the edge and glide into a valley-and-ridge landscape below.
-
-**Why this shape works:**
-- Elevation drop at launch gives immediate speed and "oh wow" moment
-- Ridgelines naturally segment the map into distinct visual zones (no need for complex biomes)
-- Concentric distance bands from launch match the rarity system perfectly (near = Common, far = Rare+)
-- Simple to build: flat top → steep cliff → rolling hills → flat valley → distant ridge
+**Built:** Forest_A authored and aligned to the corridor origin, canyon walls streaming, `RunCorridorOrigin` at `(0, 100, 0)`, `SpawnLocation` at `(0, 103, −12)` facing +Z.
+**Not built:** Forest_B, Forest_C, any hub/launch area, any static background terrain.
 
 ---
 
-## Map Dimensions
+## Distance zones and why they exist
 
-| | Value | Notes |
-|---|---|---|
-| MAX_DISTANCE | 5000 studs | Max tracked flight distance (already in GliderHandler) |
-| Launch plateau height | ~200 studs above valley floor | Enough drop for dramatic launch |
-| Playable radius | ~2500 studs from center | Diameter = 5000; players go out, not back |
-| Suggested terrain resolution | 4 studs/cell | Smooth enough, performable |
-
-At MaxSpeed = 80 studs/sec, a 5000-stud run takes ~62 seconds unassisted. With fuel (25s
-unassisted per tank, +6.25s per ring), players need 5–6 rings for a full-distance run.
-
----
-
-## Zone Breakdown
+`MAX_DISTANCE = 5000` studs. These bands are how a player learns the depth-vs-rarity trade without reading any code, and they should shape how sections are themed as they stream.
 
 ```
-Launch Zone      0–400 studs     Flat plateau top; spawn point; tutorial rings
-Near Zone        400–1200 studs  Steep cliff descent; dense ring clusters; valley entrance
-Mid Zone         1200–2800 studs Rolling hills + first ridge; moderate ring density
-Far Zone         2800–4200 studs Open valley floor + second ridge; sparse rings; rarity payoff
-Deep Zone        4200–5000 studs Distant landmark visible from launch; rare/mythical rolls
+Launch Zone   0–400      Tutorial rings; wide and forgiving
+Near Zone     400–1200   Dense ring clusters; teaches the mechanic
+Mid Zone      1200–2800  Moderate density; first real gate
+Far Zone      2800–4200  Sparse rings; the rarity payoff begins
+Deep Zone     4200–5000  Rare/Mythical territory
 ```
 
-### Zone rationale against rarity system
+These align intentionally with the tier centers in [GAR Rarity Distribution](rarity-distribution.md): Common peaks around 500 studs, Uncommon and Rare mid-range, Epic through Mythical deep.
 
-From `RarityDistribution.lua`, rarity peaks shift with distance:
-- Common peaks early (~500 studs)
-- Uncommon/Rare peak mid-range (~1500–2500)
-- Epic/Legendary/Mythical peak deep (~3500–5000)
-
-Zone boundaries intentionally align so players understand the depth-vs-rarity tradeoff
-without reading the code.
+At `MaxSpeed = 80` a 5,000-stud run takes ~62 seconds. With 25s unassisted per tank and +6.25s per ring, that's **5–6 rings minimum for a full-distance run**.
 
 ---
 
-## Terrain Building Guide (Studio)
+## Ring placement principles
 
-Build in this order — each step is independently testable:
+These carry over cleanly from the static design to per-section authoring:
 
-1. **Plateau** — Large flat Part or terrain block (~400×400 studs, 200 studs high). Add a
-   SpawnLocation on top. This is where players load in.
+1. **Teach near spawn.** 3 rings within 200 studs of launch, visible from the spawn point. Nobody should miss these.
+2. **Reward commitment.** Cluster rings just past a drop, ridge, or narrowing — risk/reward reads naturally without any tutorial text.
+3. **Trail, don't line up.** Loose curves encourage banking. A straight line of rings is a straight line of no decisions.
+4. **Gate with density.** A cluster right at a hard point rewards making it; punishing stalling before it.
+5. **Sparse midfield.** A deliberate stretch with few rings is the "push your luck" moment — do you have the fuel to reach the next cluster?
+6. **Deep payoff cluster.** The rings that matter for Rare+ runs.
 
-2. **Cliff edge** — Terrain sculpt tool: steep drop from plateau edge down to valley floor.
-   One clear "launch edge" facing the main flight direction (pick North as canonical).
+### The hard constraint
 
-3. **Valley floor** — Flat terrain at the base of the cliff. ~600 studs wide. This is Near Zone.
-
-4. **First ridge** — A long ridge (runs East–West) cutting across the valley at ~1800 studs.
-   Height: ~80 studs above valley. Players must go over or around it. Creates a natural "gate".
-
-5. **Second ridge + landmark** — Shorter ridge at ~3500 studs, plus one tall spike/spire
-   (~150 studs) visible from the launch plateau. This is the Far Zone waypoint players fly toward.
-
-6. **Subtle side features** — Scattered rock clusters, small hills: add after basic shape works.
-   Don't block early; use smooth terrain fill tool for rough shapes.
-
-**Roblox terrain tips:**
-- Use the terrain editor's "Fill" tool for big base shapes, "Sculpt" for cliff edges
-- Material: Grass for valley, Rock for cliffs, SmoothRock for the plateau top
-- Don't stress geometry detail early — get the silhouette right, then fill in
-
----
-
-## Ring Distribution
-
-### Placement principles
-
-1. **Teach the mechanic near spawn** — Place 3 rings within 200 studs of the plateau edge,
-   visible from the spawn point. These are gimme rings; no one should miss them.
-
-2. **Cliff descent cluster** — 5–6 rings down the cliff face at varying heights. Reward players
-   for committing to the launch. Spacing: ~40–60 studs apart vertically.
-
-3. **Valley floor trail** — 8–10 rings forming a loose path across the Near Zone. Not a
-   perfectly straight line — slight curves encourage banking turns.
-
-4. **Ridge gateway rings** — 3–4 rings right at the crest of the first ridge. Reward making it
-   over; punish stalling before it.
-
-5. **Midfield sparse stretch** — Only 4–5 rings across the Mid Zone open valley. This is the
-   "push your luck" segment: do you have enough fuel to reach the second ridge's cluster?
-
-6. **Far zone cluster** — 6–8 rings near the second ridge and landmark. High-value payoff for
-   players who made it deep. These are the rings that matter for Rare+ runs.
-
-### Ring spacing constraint
-
-At 4/sec drain, each ring (+25 fuel) = 6.25 seconds of extra flight. At MaxSpeed 80 studs/sec:
+At 4/sec drain and 80 studs/sec, each ring buys 6.25s ≈ 500 studs.
 
 ```
-Max horizontal gap between rings:  80 × 6.25 = 500 studs
-Safe gap (with buffer):            ~300–400 studs
+Absolute max gap:  500 studs
+Safe design gap:   300–400 studs
 ```
 
-Never place consecutive rings more than 400 studs apart unless the gap is intentional
-"danger zone" design (the midfield sparse stretch above is ~600 studs wide, which is borderline —
-fuel-conscious players make it, careless ones don't).
+Never exceed 400 studs between consecutive rings unless the gap *is* the design — see the midfield stretch above.
 
-### Total ring count estimate
+### Budget
 
-| Zone | Rings | Notes |
-|---|---|---|
-| Launch Zone | 3 | Tutorial / gimme |
-| Near Zone cliff | 6 | High density, teaches mechanic |
-| Near Zone valley | 9 | Trail |
-| Mid Zone ridge | 4 | Gateway rings |
-| Mid Zone open | 5 | Sparse, risk zone |
-| Far Zone | 8 | Deep reward cluster |
-| **Total** | **~35** | Good for MVP; add more after playtesting |
-
-35 rings × 5 Poofs = 175 Poofs maximum per full run. Keep this in mind when designing the
-Poofs spend mechanic.
+A ~35-ring run at +5 Poofs each caps out at **175 Poofs per full run**. Worth remembering when designing the Poofs sink, which doesn't exist yet ([GAR Open Questions](../open-questions.md) #6).
 
 ---
 
-## Studio Implementation Steps
+## Studio implementation notes
 
-1. **Tag rings:** In Studio, select a Part and add `PoofRing` tag via the Tag Editor plugin
-   (Built-in: View → Tag Editor). RingSystem.server.lua picks it up automatically.
+**Tagging rings:** select the Part → View → Tag Editor → add `PoofRing`. [GAR Ring System](ring-system.md) picks it up automatically, including at runtime.
 
-2. **Ring part shape:** Use a Cylinder or Torus (special mesh) rotated 90° — flat disc shape,
-   ~8–12 studs diameter. A thin cylinder (Height=1, Diameter=10) works well until you have a
-   custom Blender mesh.
+**Ring shape:** Cylinder with `Shape = Cylinder` rotated 90° on X — a flat disc facing the player. ~10 studs diameter, 1 stud thick. `Anchored = true`, `CanCollide = false`. Neon material in bright cyan or gold makes them readable at distance with zero scripting.
 
-3. **Ring material:** Neon material with a bright color (cyan or gold) makes rings visible from
-   a distance without any scripting. Transparency=0 when live, the server sets it to 1 on collect.
+**Verify wiring:** watch Output for `[RingSystem] Player collected ring 'RingName'`. If it's silent, the tag didn't apply or the ring isn't a descendant of the cloned section.
 
-4. **Test spawn:** Start a test run, fly through rings, check output for RingSystem prints:
-   `[RingSystem] Player collected ring 'RingName'` — confirms wiring worked.
+**Terrain rule:** side scenery inside a streamed section must be Parts/MeshParts. Voxel Terrain cannot be cloned or shifted, so it can only ever be static distant background.
 
 ---
 
-## Decisions made and why
+## Open
 
-**Single plateau launch, outward-only flight** — simpler than a circular course; distance from
-origin maps cleanly to rarity. Players glide away from spawn, not in loops.
+- Author Forest_B and Forest_C — see [Forest Segment Authoring Guide](../references/forest-segment-authoring.md)
+- Is there a hub/lobby area at all, or does the player spawn straight into the corridor?
+- Tune `MAX_DISTANCE` against the real reachable corridor length once B/C exist
+- Delete or repurpose the Workspace authoring copy of Forest_A before publishing — it overlaps section 0 during Play
 
-**Manual ring placement vs. procedural** — manual for MVP. Scripted placement is faster to
-iterate but produces boring uniform spacing. Manual lets us tune for visual interest and
-terrain-following rings.
+## Related
 
-**Ridgelines as natural gates** — creates visible goals during flight ("I can see that ridge,
-I want to make it there") without scripted waypoints. Emergent pacing.
-
-## Depends on / blocks
-- Depends on: flight mechanics testable (done), fuel system (done), ring system (done)
-- Blocks: true playtest with real feel; Poofs economy balance; social mechanic (needs other players in a real map)
+[GAR ProcGen Corridor](proc-gen.md) · [GAR Fuel System](fuel-system.md) · [GAR Atmosphere](atmosphere.md) · [GAR Sprint Plan](../sprint-plan.md)
