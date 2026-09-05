@@ -1,10 +1,12 @@
 local Players           = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService       = game:GetService("HttpService")
 
 local PlayerData          = require(script.Parent.PlayerData)
 local CreatureDictionary  = require(ReplicatedStorage:WaitForChild("CreatureDictionary"))
 local RarityDistribution  = require(ReplicatedStorage:WaitForChild("RarityDistribution"))
 local GameEvents          = require(script.Parent:WaitForChild("GameEvents"))
+local HoldableToolFactory = require(ReplicatedStorage:WaitForChild("HoldableToolFactory"))
 
 local crateResultEvent   = ReplicatedStorage:FindFirstChild("CrateResultClient")
 local crateRollDataEvent = ReplicatedStorage:FindFirstChild("CrateRollDataClient")
@@ -81,60 +83,10 @@ end
 -- ============================================================
 -- Holdable tool creation (visual equip in hotbar/world)
 -- ============================================================
+-- Delegates to the shared factory so crate-rolled and hold-on-rejoin prefabs
+-- stay byte-identical (see HoldableToolFactory).
 local function ensureHoldableTool(species, rarityName)
-	local holdableFolder = ReplicatedStorage:FindFirstChild("HoldableCreatures")
-	if not holdableFolder then return end
-
-	local toolName = species.InternalName .. "_" .. rarityName
-	if holdableFolder:FindFirstChild(toolName) then return end
-
-	local creatureModel = ReplicatedStorage.CreatureModels:FindFirstChild(species.ModelName)
-	if not creatureModel then return end
-
-	local newTool = Instance.new("Tool")
-	newTool.Name = toolName
-	newTool:SetAttribute("Species", species.InternalName)
-	newTool:SetAttribute("Rarity",  rarityName)
-
-	local modelClone = creatureModel:Clone()
-	local handle
-
-	for _, child in ipairs(modelClone:GetChildren()) do
-		if child.Name == "RootPart" then
-			child.Name      = "Handle"
-			child.Anchored  = false
-			child.CanCollide = false
-			child.Massless  = true
-			handle = child
-		end
-		child.Parent = newTool
-	end
-
-	if handle then
-		for _, child in ipairs(newTool:GetChildren()) do
-			if child:IsA("BasePart") and child ~= handle then
-				local weld  = Instance.new("WeldConstraint")
-				weld.Part0  = handle
-				weld.Part1  = child
-				weld.Parent = child
-			end
-		end
-	end
-
-	local strips = { "AnimationController", "VfxInstance", "FakeRootPart" }
-	for _, name in ipairs(strips) do
-		local c = newTool:FindFirstChild(name)
-		if c then c:Destroy() end
-	end
-
-	for _, child in ipairs(newTool:GetChildren()) do
-		if child:IsA("BasePart") then
-			child.Massless   = true
-			child.CanCollide = false
-		end
-	end
-
-	newTool.Parent = holdableFolder
+	HoldableToolFactory.Ensure(species.InternalName, rarityName)
 end
 
 -- ============================================================
@@ -168,6 +120,7 @@ GameEvents.RunEnded.Event:Connect(function(player, distance)
 		Species = species.InternalName,
 		Rarity  = rarityRoll.name,
 		Income  = income,
+		Uid     = HttpService:GenerateGUID(false),
 	})
 
 	ensureHoldableTool(species, rarityRoll.name)

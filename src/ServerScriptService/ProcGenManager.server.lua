@@ -30,7 +30,11 @@ local GameEvents       = require(game:GetService("ServerScriptService"):WaitForC
 local gliderEquipEvent = ReplicatedStorage:WaitForChild("GliderEquipClient")
 
 local SEGMENT_LENGTH   = 500                    -- studs; floor Z-depth of each template
-local SECTIONS_AHEAD   = 3                       -- sections kept loaded beyond the player
+-- SECTIONS_AHEAD must keep the spawn boundary BEYOND the fog horizon so sections
+-- always materialize inside the haze, never in clear air. AtmosphereController's
+-- Forest haze fully obscures well under 2000 studs; 4 sections = 2000-stud
+-- lookahead gives comfortable margin at the ~90 studs/sec airspeed cap.
+local SECTIONS_AHEAD   = 4                       -- sections kept loaded beyond the player
 local SECTIONS_BEHIND  = 1                       -- sections kept behind (look-back buffer)
 local BIOME            = "Forest"                -- v1 hardcoded
 local FALLBACK_ORIGIN  = Vector3.new(0, 100, 0)  -- used if no RunCorridorOrigin marker

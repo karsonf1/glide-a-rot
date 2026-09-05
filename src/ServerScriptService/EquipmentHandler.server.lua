@@ -27,11 +27,14 @@ equipCreatureEvent.OnServerEvent:Connect(function(player, internalName, slotInde
 	local profile = PlayerData.GetProfile(player)
 	if not profile then return end
 
-	-- Verify the creature is actually in the player's server-authoritative inventory
+	-- Verify the creature is actually in the player's server-authoritative inventory.
+	-- Inventory holds rot OBJECTS { Species, Rarity, Income, Uid } — the old check
+	-- compared the object to a name string and so ALWAYS failed. Match on Species,
+	-- which is what the (species-keyed) hotbar UI sends.
 	local inventory = profile.Data.Inventory or {}
 	local owned = false
-	for _, name in ipairs(inventory) do
-		if name == internalName then
+	for _, rot in ipairs(inventory) do
+		if type(rot) == "table" and rot.Species == internalName then
 			owned = true
 			break
 		end
