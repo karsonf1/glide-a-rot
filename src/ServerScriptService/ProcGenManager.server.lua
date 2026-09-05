@@ -9,7 +9,7 @@
 -- client's network ownership of the HumanoidRootPart and caused the stutter) is
 -- gone entirely.
 --
--- Each "section" = one floor segment (Forest_A/B/C from ServerStorage) tiled at
+-- Each "section" = one floor segment (Forest_A/B/C from ReplicatedStorage) tiled at
 -- 500-stud intervals, plus one universal canyon-wall set cloned alongside it.
 --
 -- Alignment is done by each template's `floor` Part (250 x 500), NOT the model
@@ -23,17 +23,15 @@
 local Players             = game:GetService("Players")
 local RunService          = game:GetService("RunService")
 local ReplicatedStorage   = game:GetService("ReplicatedStorage")
-local ServerStorage       = game:GetService("ServerStorage")
 
 local SegmentRegistry  = require(ReplicatedStorage:WaitForChild("SegmentRegistry"))
 local GameEvents       = require(game:GetService("ServerScriptService"):WaitForChild("GameEvents"))
 local gliderEquipEvent = ReplicatedStorage:WaitForChild("GliderEquipClient")
 
 local SEGMENT_LENGTH   = 500                    -- studs; floor Z-depth of each template
--- SECTIONS_AHEAD must keep the spawn boundary BEYOND the fog horizon so sections
--- always materialize inside the haze, never in clear air. AtmosphereController's
--- Forest haze fully obscures well under 2000 studs; 4 sections = 2000-stud
--- lookahead gives comfortable margin at the ~90 studs/sec airspeed cap.
+-- Four sections provide a 2000-stud generation lookahead. Whether that boundary
+-- is visible depends on graphics quality, asset loading, camera and atmosphere;
+-- haze is not a guaranteed distance cutoff. Verify it in a client playtest.
 local SECTIONS_AHEAD   = 4                       -- sections kept loaded beyond the player
 local SECTIONS_BEHIND  = 1                       -- sections kept behind (look-back buffer)
 local BIOME            = "Forest"                -- v1 hardcoded
@@ -69,7 +67,7 @@ end
 
 -- ── Template lookup (defensive) ──────────────────────────────────────────────
 local function getFloorTemplate(name)
-	local root  = ServerStorage:FindFirstChild("SegmentTemplates")
+	local root  = ReplicatedStorage:FindFirstChild("SegmentTemplates")
 	local biome = root and root:FindFirstChild(BIOME)
 	local t      = biome and biome:FindFirstChild(name)
 	if not t then warn(("[ProcGen] Missing floor template %s/%s"):format(BIOME, name)) end
@@ -79,11 +77,31 @@ end
 local function getWallTemplate()
 	local wallName = SegmentRegistry[BIOME] and SegmentRegistry[BIOME].walls
 	if not wallName then return nil end
-	local root  = ServerStorage:FindFirstChild("WallTemplates")
+	local root  = ReplicatedStorage:FindFirstChild("WallTemplates")
 	local biome = root and root:FindFirstChild(BIOME)
 	local t      = biome and biome:FindFirstChild(wallName)
 	if not t then warn(("[ProcGen] Missing wall template %s/%s"):format(BIOME, tostring(wallName))) end
 	return t
+end
+
+-- Reject an incomplete authored place before removing its preview geometry.
+-- Advancing the stream past a missing template would otherwise leave a hole.
+local function validateTemplates()
+	for _, name in SegmentRegistry[BIOME].segments do
+		local template = getFloorTemplate(name)
+		local geometry = template and template:FindFirstChild("Geometry")
+		local floor = geometry and geometry:FindFirstChild("floor")
+		if not template or not template:IsA("Model") or not floor or not floor:IsA("BasePart") then
+			warn(("[ProcGen] %s needs a Model with Geometry/floor; run not built"):format(name))
+			return false
+		end
+	end
+	local walls = getWallTemplate()
+	if SegmentRegistry[BIOME].walls and (not walls or not walls:IsA("Model")) then
+		warn("[ProcGen] Wall template missing or not a Model; run not built")
+		return false
+	end
+	return true
 end
 
 -- ── Floor selection (no back-to-back repeat when pool has > 1) ───────────────
@@ -227,6 +245,10 @@ end)
 
 -- Run start (glider equipped). Independent connection from GliderHandler.
 gliderEquipEvent.OnServerEvent:Connect(function(player, isEquipped)
+	if typeof(isEquipped) ~= "boolean" then
+		warn(("[ProcGen] Invalid equip state from %s"):format(player.Name))
+		return
+	end
 	if not isEquipped then return end
 	if activeRunner then
 		if activeRunner ~= player then
@@ -235,6 +257,7 @@ gliderEquipEvent.OnServerEvent:Connect(function(player, isEquipped)
 		end
 		return
 	end
+	if not validateTemplates() then return end
 	activeRunner = player
 	resolveOrigin()
 	buildInitial()

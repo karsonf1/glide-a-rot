@@ -35,7 +35,7 @@ src/
 └── Workspace/            ← in-world prefabs and their scripts
 ```
 
-**Not in Rojo:** `ServerStorage` (segment templates, wall templates) and authored Workspace geometry live inside `HangglideARot.rbxlx`. That file is tracked by git but diffs as binary, so real review only ever happens on `.lua` files. **Saving the place in Studio is a required step before committing map work** — this has bitten the project before.
+**Authored content outside source sync:** segment/wall templates in `ReplicatedStorage` and authored Workspace geometry live inside `HangglideARot.rbxl`. The binary place is tracked by Git; inspect its content in Studio. **Saving the local place in Studio is required before committing map work.** Rojo maps source scripts but does not reconstruct those authored assets.
 
 ---
 
@@ -68,7 +68,7 @@ Covered in full in [Forest Segment Authoring Guide](references/forest-segment-au
 - Rings in a `Rings/` subfolder, each tagged `PoofRing`.
 - No geometry past the X/Y bounds — sections mirror on X.
 - **Side scenery must be Parts/MeshParts, never voxel Terrain.** Terrain is a singleton and cannot be cloned or shifted per section.
-- Templates live at `ServerStorage/SegmentTemplates/<Biome>/<Name>` and the name must match `SegmentRegistry`.
+- Templates live at `ReplicatedStorage/SegmentTemplates/<Biome>/<Name>` in the verified saved place; the name must match `SegmentRegistry`. The server remains authoritative for all spawned gameplay/rewards.
 
 Note the current streamer aligns sections by the `floor` Part, **not** the model pivot, because authored pivots are inconsistent (Forest_A at entry, B/C at exit).
 

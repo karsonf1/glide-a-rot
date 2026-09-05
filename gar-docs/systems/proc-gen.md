@@ -4,6 +4,8 @@
 
 **Status:** 🟡 in progress · `src/ServerScriptService/ProcGenManager.server.lua` + `src/ReplicatedStorage/SegmentRegistry.lua`
 
+**2026-09-05 verification:** The saved place is now `HangglideARot.rbxl`. Templates actually live under **ReplicatedStorage**, and the Codex follow-up corrects source lookup to match. A/B/C all contain scenery; all three Rings folders are empty. StreamingEnabled is false. The old assumptions below about floor-only B/C and a guaranteed fog horizon are superseded by the [measured rendering proposal](../proposals/2026-09-05-corridor-rendering.md). No LOD architecture has been implemented.
+
 > **This system was rewritten on 2026-07-03.** Any doc describing a "teleport treadmill" is stale — that architecture is gone. See [Forward Streamer over Treadmill](../decisions/2026-07-03-forward-streamer-over-treadmill.md) for why.
 
 ## Goal
@@ -14,7 +16,7 @@ Make runs feel infinite and varied without storing infinite geometry. The player
 
 Sections load **ahead** of the player and unload **behind** them. No teleporting, no world-shifting, no `RunOffsetApplied`. Because a run is fuel-bounded to roughly 5,000 studs, coordinates stay small enough that float precision was never actually a problem — which is what made the teleport trick unnecessary in the first place.
 
-Each "section" = one floor segment (Forest_A/B/C, cloned from `ServerStorage`) tiled at 500-stud intervals, **plus** one universal canyon-wall set cloned alongside it.
+Each "section" = one floor segment (Forest_A/B/C, cloned from `ReplicatedStorage`) tiled at 500-stud intervals, **plus** one universal canyon-wall set cloned alongside it.
 
 ### Constants
 
@@ -38,7 +40,7 @@ Sections are **coplanar** — no altitude variance — so floors and walls line 
 
 ### Walls
 
-`SegmentRegistry.Forest.walls = "Forest_Walls"` names a universal Left+Right set under `ServerStorage/WallTemplates/<Biome>/`. One set clones per section and tiles along Z; organic overlap in the geometry hides the seams.
+`SegmentRegistry.Forest.walls = "Forest_Walls"` names a universal Left+Right set under `ReplicatedStorage/WallTemplates/<Biome>/`. One set clones per section and tiles along Z; organic overlap in the geometry hides the seams.
 
 ### Ring integration — free
 
@@ -55,7 +57,7 @@ Roblox voxel Terrain is a singleton on a fixed grid — it cannot be CFramed, cl
 
 ## Open
 
-- **Forest_B and Forest_C are floor-only stubs.** The pool has three names and one real segment; back-to-back-repeat avoidance is currently meaningless. Authoring these is the top content task — see [Forest Segment Authoring Guide](../references/forest-segment-authoring.md).
+- **Author ring routes and assess layout variety.** A/B/C have scenery, but their Rings folders are empty. The RingSystem hitbox cooldown must preserve authored collision/transparency before using the existing ring asset.
 - **Player↔corridor coupling** — the corridor builds at `RunCorridorOrigin` but nothing binds the player to it. See [GAR Open Questions](../open-questions.md) #1.
 - Multiplayer: one shared corridor, or one window per player? v1 assumes a single runner.
 - Mirroring on X was in the original design; confirm whether it survived the rewrite given the coplanar wall constraint.

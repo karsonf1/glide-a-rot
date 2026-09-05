@@ -2,11 +2,9 @@
 -- AtmosphereController.client.lua  (StarterPlayerScripts — LocalScript)
 -- Owns the cosmetic sky/horizon haze.
 --
--- WHY THIS EXISTS: the ProcGen corridor streams sections in ~2000 studs ahead of
--- the player. With no horizon haze, you literally watch each section clone into
--- existence in clear air ("models appear in front of me"). Player airspeed caps
--- at ~90 studs/sec (GliderConfig), so the lookahead is huge in time terms — the
--- ONLY thing missing was something to fade the far geometry into a horizon.
+-- ProcGen creates sections about 2000 studs ahead. Haze can soften their visible
+-- boundary, but does not guarantee a distance cutoff or load missing mesh assets.
+-- Verify the result at the actual camera angle and low/high graphics settings.
 --
 -- The key property is Atmosphere.Haze. It builds a horizon band that dissolves
 -- distant geometry into the sky. Density thins the whole air column. Together
@@ -23,8 +21,8 @@ local TweenService      = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 -- ── Fog profiles (per biome) ─────────────────────────────────────────────────
--- Haze  ~0 = none, ~3 = strong horizon fade. 2.6 fully buries the spawn line
---       well inside the ~2000-stud lookahead at 90 studs/sec.
+-- Haze ~0 = none, ~3 = strong horizon fade. These inherited values are a starting
+-- point for the client playtest, not a measured 2000-stud visibility guarantee.
 -- Tune Haze/Density up if any pop-in still shows; down if it feels claustrophobic.
 local PROFILES = {
 	Forest = {

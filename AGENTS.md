@@ -3,6 +3,25 @@
 Context for any coding agent working in this repo (Codex, Claude Code, Cursor, Copilot).
 Read this first, then `gar-docs/project-state.md`.
 
+## Codex handoff verification — 2026-09-05
+
+PR #3 merged at `f5c2a64`, preserving inherited source, docs, and the user-saved
+`HangglideARot.rbxl`. Codex work begins after this boundary on
+`codex/corridor-sync-and-rendering`. See `gar-docs/sessions/2026-09-05-codex-handoff.md`.
+
+This inspection supersedes conflicting historical notes below:
+- The saved place is `.rbxl`, replacing the stale June `.rbxlx`.
+- Segment/wall templates are in **ReplicatedStorage**, outside source-managed geometry.
+  A/B/C all contain scenery, but all three `Rings` folders are empty.
+- Rojo must map client scripts under **StarterPlayer/StarterPlayerScripts**.
+- The stale Git lock was cleared after verifying no Git process was active.
+- Studio editor buffers can differ from `Script.Source`; inspect both when syncing.
+- The Studio flight physics draft is archived under `gar-docs/handoff/2026-09-05-studio`;
+  its required GliderConfig fields are absent. The compatible repository controller
+  is the active source until that draft is deliberately completed.
+- StreamingEnabled is false in the saved scene. Rendering and end-to-end gameplay
+  still require a client playtest; a successful Rojo build only validates packaging.
+
 ---
 
 ## What this is
@@ -24,7 +43,7 @@ Target is a 5-week MVP; the project is in the **map + procgen** stretch.
 | Language | Luau (Roblox) |
 | Sync | [Rojo](https://rojo.space) — `default.project.json` maps `src/` into the place |
 | Toolchain | `rokit.toml` / `aftman.toml` |
-| Place file | `HangglideARot.rbxlx` — tracked in git, **diffs as binary** |
+| Place file | `HangglideARot.rbxl` — tracked in git, **diffs as binary** |
 
 ```
 src/
@@ -96,13 +115,13 @@ These are the ones an agent unfamiliar with the project gets wrong. Full list in
   silently orphans rots in live players' inventories.
 - **Config lives in registries, never inline.** `GliderConfig`, `CreatureDictionary`,
   `RarityDistribution`, `SegmentRegistry`. Adding content should mean editing one table.
-- **`ServerStorage` is not in the Rojo tree.** Segment templates, wall templates, and
-  authored Workspace geometry live only inside `HangglideARot.rbxlx`. Editing `src/`
+- **Authored assets are not reconstructed by Rojo.** Segment/wall templates are in
+  ReplicatedStorage in `HangglideARot.rbxl`, alongside authored Workspace geometry. Editing `src/`
   cannot touch them. Map work requires Ctrl+S in Studio before it can be committed.
 
 ---
 
-## Current state — verified 2026-09-05
+## Historical pre-handoff state — superseded by the verification above
 
 - Branch **`perf/procgen-seamless-streaming`**, HEAD `743fa55` (2026-07-03), one commit
   ahead of `main` and **not pushed**. `origin/main` is at `a21fe46`.
