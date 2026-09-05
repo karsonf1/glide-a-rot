@@ -57,7 +57,7 @@ Players.PlayerRemoving:Connect(function(player)
 	runStarts[player]     = nil
 end)
 
-GameEvents.FuelDepleted:Connect(function(player)
+GameEvents.FuelDepleted.Event:Connect(function(player)
 	-- Guard: run already ended (manual stow beat us here)
 	if runStarts[player] == nil then return end
 
@@ -84,12 +84,4 @@ GameEvents.FuelDepleted:Connect(function(player)
 
 	print(("[GliderHandler] %s → run ended by fuel depletion | distance: %.1f studs"):format(player.Name, distance))
 	GameEvents.RunEnded:Fire(player, distance)
-end)
-
--- ProcGenManager teleports the player back by one segment length each treadmill
--- recycle. Shift runStarts by the same offset so distance tracking stays accurate.
-GameEvents.RunOffsetApplied.Event:Connect(function(player, offset)
-	if runStarts[player] then
-		runStarts[player] = runStarts[player] + offset
-	end
 end)

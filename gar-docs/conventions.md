@@ -1,35 +1,97 @@
+<!-- Synced from the Obsidian vault (02 - Glide-A-Rot) on 2026-09-05. gar-docs/ is the in-repo source of truth for engineering docs. -->
+
 # GAR Conventions
 
-## Naming
-- Scripts: PascalCase.lua (ModuleScripts) or descriptive.server.lua / descriptive.client.lua
-- Commit scopes: flight, rot, crate, inventory, social, economy, ui, data, glider, map, monetization
-- Rot internal names: match CreatureDictionary keys exactly (used across DataStore, events, tool names)
-- Holdable tool naming: `{InternalName}_{RarityName}` (e.g. `TungTungSahur_Legendary`)
+The house rules for [Glide-A-Rot](_index.md). These are already enforced in the codebase — new code matches them, it doesn't relitigate them.
 
-## File structure
+---
+
+## Naming
+
+| Thing | Convention | Example |
+|---|---|---|
+| ModuleScript | `PascalCase.lua` | `RarityDistribution.lua` |
+| Server Script | `descriptive.server.lua` | `RingSystem.server.lua` |
+| LocalScript | `descriptive.client.lua` | `Client.client.lua` |
+| Rot internal name | Must match `CreatureDictionary` key exactly | `TungTungSahur` |
+| Holdable tool | `{InternalName}_{RarityName}` | `TungTungSahur_Legendary` |
+| Segment model | `{Biome}_{Letter}` | `Forest_A` |
+| Commit scope | one of the fixed set below | `feat(procgen): ...` |
+
+**Commit scopes:** `flight`, `rot`, `crate`, `inventory`, `social`, `economy`, `ui`, `data`, `glider`, `map`, `monetization`, `procgen`, `docs`.
+
+The internal-name rule matters more than it looks: the same string is the DataStore key, the RemoteEvent payload, the tool name, and the model lookup. A rename in one place silently orphans rots in players' inventories.
+
+---
+
+## File Structure
+
 ```
 src/
-├── ReplicatedStorage/       ← shared ModuleScripts (GliderConfig, RarityDistribution, CreatureDictionary, CreatureModels)
-├── ServerScriptService/     ← server Scripts + ModuleScripts (PlayerData, CrateSystem, GliderHandler, EquipmentHandler, GameManager, GameEvents)
-├── StarterPlayerScripts/    ← client LocalScripts (Client.client.lua = flight controller)
-├── StarterGui/              ← UI LocalScripts (InventoryUI, CrateUI, GliderTestUI)
-└── Workspace/               ← in-world prefabs and scripts (CreatureSlotPrefab)
+├── ReplicatedStorage/    ← shared ModuleScripts, config registries
+├── ServerScriptService/  ← server Scripts + server-only modules
+├── StarterPlayerScripts/ ← client controllers (flight, atmosphere)
+├── StarterGui/           ← ScreenGui LocalScripts
+└── Workspace/            ← in-world prefabs and their scripts
 ```
 
-## Architecture decisions
-- **3–4 distinct hangglider types** (not one upgradeable type) — Beginner and Advanced already in GliderConfig; Elite template commented in for future
-- **Rarity-tier income baked at roll time** — rot.Income = species.IncomeRate × rarity.multiplier, stored on the rot object; no live stat lookup needed
-- **DataStore V4** — rot inventory stores objects {Species, Rarity, Income}; V3 string entries auto-migrated on load
-- **Distance-based rarity** — RarityDistribution.lua; MAX_DISTANCE=5000 studs; tune with map design
-- **Monetization philosophy** — acceleration-not-gatekeeping; free players can progress, paid speeds it up (cooldown reduction, crate timers, cosmetic skins)
+**Not in Rojo:** `ServerStorage` (segment templates, wall templates) and authored Workspace geometry live inside `HangglideARot.rbxlx`. That file is tracked by git but diffs as binary, so real review only ever happens on `.lua` files. **Saving the place in Studio is a required step before committing map work** — this has bitten the project before.
 
-## Code style
-- Server authority on all economy changes; client fires RemoteEvents, server validates + writes DataStore
-- Guards first in event handlers: type check → range check → ownership check → then act
-- Use `warn()` for rejected/suspicious client requests; `print()` for normal lifecycle logs
-- `.server.lua` suffix for Server Scripts, `.client.lua` for LocalScripts, no suffix for ModuleScripts
+---
 
-## Rojo / GitHub pipeline
-- Repo: github.com/karsonf1/glide-a-rot (main branch)
-- Sync via Rojo; .rbxlx file tracked but diffs are binary — script changes go through .lua files
-- Both PC (`C:\Users\karso\Desktop\Glide-A-Rot!`) and laptop share same repo via git pull
+## Architecture Rules
+
+**Server authority on every economy change.** The client fires a RemoteEvent; the server validates and writes. The client is display-only for Poofs, fuel, rot inventory, and rarity. Never regress this.
+
+**Guards first in every handler.** In order: type check → range check → ownership check → cooldown check → *then* act. `warn()` on a rejected or suspicious request, `print()` for normal lifecycle.
+
+**Income is baked at roll time.** `rot.Income = species.IncomeRate × rarity.multiplier`, stored on the rot object. No live stat lookup at tick time. This is what makes [GAR Passive Income](systems/passive-income.md) cheap to build later.
+
+**Distinct glider types, not one upgradeable glider.** See [Glider Architecture Decision](decisions/2026-06-29-glider-architecture.md).
+
+**Decoupling via BindableEvents.** `GameEvents.lua` owns `RunEnded` and `FuelDepleted`. Systems fire and listen through it rather than requiring each other directly. *Gotcha, already hit once:* a BindableEvent is `event.Event:Connect(...)`, not `event:Connect(...)` — the latter silently errors and broke the whole fuel→crate chain until it was caught on 2026-07-03.
+
+**Config lives in registries, never inline.** Flight stats in `GliderConfig`, species in `CreatureDictionary`, tiers in `RarityDistribution`, segment pools in `SegmentRegistry`. Adding content should mean editing one table, never touching logic.
+
+**Modern movers only.** `LinearVelocity` + `AlignOrientation`. Do not reintroduce `BodyVelocity` / `BodyGyro`.
+
+**Never set position server-side on a client-owned part.** The HumanoidRootPart's network ownership is handed to the client on glider equip. Server-side CFrame writes fight the client and produce rubber-banding. This is the lesson of [Forward Streamer over Treadmill](decisions/2026-07-03-forward-streamer-over-treadmill.md).
+
+---
+
+## Segment Authoring
+
+Covered in full in [Forest Segment Authoring Guide](references/forest-segment-authoring.md). The non-negotiables:
+
+- 500 studs deep along **+Z**, floor part 250 × 500.
+- All descendant BaseParts **anchored**.
+- Rings in a `Rings/` subfolder, each tagged `PoofRing`.
+- No geometry past the X/Y bounds — sections mirror on X.
+- **Side scenery must be Parts/MeshParts, never voxel Terrain.** Terrain is a singleton and cannot be cloned or shifted per section.
+- Templates live at `ServerStorage/SegmentTemplates/<Biome>/<Name>` and the name must match `SegmentRegistry`.
+
+Note the current streamer aligns sections by the `floor` Part, **not** the model pivot, because authored pivots are inconsistent (Forest_A at entry, B/C at exit).
+
+---
+
+## Tooling Pipeline
+
+**Rojo** syncs `src/*.lua` ↔ Studio. **Rokit/Aftman** manage the toolchain (`rokit.toml`, `aftman.toml`). **Claude Code in VS Code** writes the Luau. **Blender** handles the hangglider and hero props — see [Blender to Roblox Pipeline](references/blender-to-roblox-pipeline.md). Roblox Creator Store supplies the ~50 brainrot creature models.
+
+Same repo on desktop and laptop via `git pull`. Both machines point at `C:\Users\karso\Desktop\Glide-A-Rot!`.
+
+**MCP awareness:** this project has the official Roblox Studio MCP and the Blender MCP available. Check what's actually connected before assuming — with Studio MCP live you can run Luau and read the console directly; without it, produce copy-paste-ready scripts instead.
+
+---
+
+## Division of Labour
+
+Karson owns Studio world-building, map design, and Blender. Scripting is delegated to a Claude Code agent. UI and visual work are **in scope** for Claude.
+
+**The one guardrail:** never let a "best practice" hurt fun or replayability. Neutral engineering advice — performance, safety, clarity — always applies. Taste-level design rules are subordinate to the game feeling good.
+
+---
+
+## Related
+
+[Glide-A-Rot](_index.md) · [GAR Codebase Map](codebase-map.md) · [GAR Roblox Playbook](roblox-playbook.md) · [GAR Project State](project-state.md)

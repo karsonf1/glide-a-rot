@@ -1,20 +1,37 @@
-# Hangglider architecture: distinct types vs. single upgradeable glider
-_Resolved: prior to 2026-06-29 (exact date not recorded; logged retroactively)_
+<!-- Synced from the Obsidian vault (02 - Glide-A-Rot) on 2026-09-05. gar-docs/ is the in-repo source of truth for engineering docs. -->
+
+# Glider Architecture Decision
+
+**Decided:** 2026-06-29 (logged retroactively)
 
 ## Question
-Should GAR have 3-4 distinct hangglider types, or a single glider that upgrades linearly?
+
+Should [Glide-A-Rot](../_index.md) have 3–4 distinct hangglider types, or a single glider that upgrades linearly?
 
 ## Decision
-3-4 distinct hangglider types. Beginner and Advanced are currently defined; Speed and Tank types
-are planned.
+
+**3–4 distinct types.** Beginner and Advanced are live in `GliderConfig`; Elite exists as a commented template.
 
 ## Why
-Distinct types provide deeper progression (each unlock feels meaningfully different, not just a
-stat bump), open more monetization angles (sell specific gliders/skins rather than one linear
-upgrade), and create more meaningful interaction with the social rarity mechanic, since other
-players can visually recognize which glider type someone is flying. A single upgradeable glider
-was considered and rejected as faster to build but shallower for both progression and
-monetization.
+
+Three arguments, in order of weight:
+
+**Progression depth.** Each unlock feels categorically different rather than a stat bump. Advanced isn't just "Beginner +10 speed" — it has a shallower glide angle (better fuel efficiency per stud), a faster turn rate, and a *lower* turn decay that makes it carve longer and demand more anticipation. That's a different aircraft, not a better one.
+
+**Monetization surface.** Distinct types mean you can sell a specific glider, or a skin pack per type, instead of one linear upgrade path where every purchase is interchangeable with the next. See [GAR Monetization](../systems/monetization.md).
+
+**Social legibility.** [GAR Social Mechanic](../systems/social-mechanic.md) depends on players recognizing what others are flying at a glance. Silhouette differences between distinct gliders carry that signal; a single reskinned glider wouldn't.
+
+## Trade-off accepted
+
+A single upgradeable glider would have been faster to build and easier to balance. Judged not worth the progression and monetization depth lost.
+
+## Consequences
+
+- `GliderConfig` is the single stat registry — no flight values live anywhere else.
+- Adding a tier is three steps: copy an entry, add the key to `CreatureDictionary`, place the model in `ReplicatedStorage/GliderModels`.
+- Opened a follow-on question that is still unresolved: do slot counts vary by tier? See [GAR Open Questions](../open-questions.md) #2.
 
 ## Affects
-[[glider-types]], [[social-mechanic]] (visible glider identity), [[monetization]] (skins surface)
+
+[GAR Glider Types](../systems/glider-types.md) · [GAR Flight Mechanics](../systems/flight-mechanics.md) · [GAR Inventory and Equipment](../systems/inventory-and-equipment.md)

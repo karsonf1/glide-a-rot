@@ -1,79 +1,47 @@
-# Ring System
+<!-- Synced from the Obsidian vault (02 - Glide-A-Rot) on 2026-09-05. gar-docs/ is the in-repo source of truth for engineering docs. -->
 
-_Added: 2026-06-29_
+# GAR Ring System
+
+**Status:** ✅ built (server) · 🔴 no client VFX · `src/ServerScriptService/RingSystem.server.lua`
 
 ## Goal
 
-Rings (PoofRings) are the primary mid-flight interaction object. They serve two purposes:
-1. **Refuel** — keep the player airborne by replenishing fuel (+25 per ring)
-2. **Reward** — award Poofs currency (+5 per ring), building toward a future spend mechanic
-
-Good ring placement turns a straight glide into a flight path with decisions: do I chase
-that ring cluster or push for distance for a better rarity roll?
+PoofRings are the primary mid-flight interaction. Two jobs: **refuel** (+25, keeping the player airborne) and **reward** (+5 Poofs). Good placement turns a straight glide into a series of decisions — chase the ring cluster, or push for raw distance and a better rarity roll?
 
 ## How it works
 
-### Placement
-- Any Part in the Workspace tagged `PoofRing` via CollectionService is automatically wired
-- RingSystem also listens to `CollectionService:GetInstanceAddedSignal("PoofRing")` so rings
-  spawned at runtime (e.g., procedural placement later) are picked up without a restart
+**Placement is tag-driven.** Any Part in Workspace tagged `PoofRing` via CollectionService is wired automatically. `RingSystem` also listens on `CollectionService:GetInstanceAddedSignal("PoofRing")`, so rings cloned in at runtime by [GAR ProcGen Corridor](proc-gen.md) register with zero extra work. This is the integration point that makes streamed segments free.
 
-### On touch
-1. Per-ring debounce check — skip if ring is on cooldown
+**On touch:**
+1. Per-ring debounce check — skip if on cooldown
 2. `Players:GetPlayerFromCharacter(hit.Parent)` — skip non-player touches
-3. `PlayerData.AwardPoofs(player, 5)` — adds to Poofs balance, saves, fires PoofUpdate
-4. `FuelSystem.Refuel(player, 25)` — refills fuel, fires FuelUpdate to client
-5. `ringCollected:FireClient(player, ring)` — client can play VFX / sound
-6. Ring goes invisible + non-collidable for 8 seconds, then respawns
+3. `PlayerData.AwardPoofs(player, 5)` → saves, fires `PoofUpdate`
+4. `FuelSystem.Refuel(player, 25)` → fires `FuelUpdate`
+5. `ringCollected:FireClient(player, ring)` → **no client consumer yet**
+6. Ring goes invisible + non-collidable for 8s, then respawns
 
-### Debounce model
-- **Per-ring**, not per-player — two players can collect the same ring in the same window
-  if they touch it before either one's 8s respawn. This is intentional: cooperative feel,
-  less frustration on shared rings. If we want to change this, see notes.
+## Constants
 
-## Key file paths
-```
-src/ServerScriptService/RingSystem.server.lua   ← all ring wiring + touch logic
-src/ServerScriptService/FuelSystem.lua          ← Refuel() called by ring
-src/ServerScriptService/PlayerData.lua          ← AwardPoofs() called by ring
-```
+| Constant | Value |
+|---|---|
+| `RING_FUEL_REFILL` | 25 |
+| `RING_POOF_REWARD` | 5 |
+| `RING_RESPAWN_DELAY` | 8s |
 
-## Constants (tune here)
-| Constant | Value | Notes |
-|---|---|---|
-| RING_FUEL_REFILL | 25 | Fuel awarded per ring touch |
-| RING_POOF_REWARD | 5 | Poofs awarded per ring touch |
-| RING_RESPAWN_DELAY | 8 | Seconds before ring reappears |
+## Decisions and why
 
-## Ring placement strategy (starter map)
-See game-map.md for detailed layout. Key principles:
+**CollectionService tags over folder hierarchy.** Rings work from anywhere in Workspace; no folder discipline required, easy to retag in the Studio Tag Editor, and runtime-cloned rings self-register.
 
-- **Density near spawn** — 3–4 rings within 200 studs of launch so new players immediately
-  learn the mechanic
-- **Sparse midfield** — force players to choose between fuel-safe routes and high-risk
-  long glides for better rarity rolls
-- **Cluster near terrain obstacles** — rings just past a cliff edge or ridge reward
-  committed fliers; risk/reward reads naturally
-- **Ring-to-ring gap ≤ 25s of flight** — at current drain (4/sec, 25 fuel/ring = 100 fuel)
-  the max safe gap is ~6 seconds unassisted; clusters should never require more than that
-  without a refill opportunity nearby
+**Per-ring debounce, not per-player.** Two players can collect the same ring inside the same 8s window. Deliberate: it avoids the "race to the ring" frustration and keeps the cooperative tone consistent with the direction [GAR Social Mechanic](social-mechanic.md) is heading.
 
-## Decisions made and why
+**8-second respawn.** Fast enough to feel alive, slow enough that a player can't hover-loop one ring for infinite fuel.
 
-**CollectionService tags over folder hierarchy** — rings placed anywhere in Workspace
-are automatically wired; designer doesn't need to put them in a specific folder. Easy to
-retag in Studio with the Tag Editor plugin.
+## Open
 
-**Per-ring debounce** — avoids the "race to the ring" frustration where two players approach
-simultaneously and only one gets the reward. Keeps the cooperative feel consistent with
-the rest of the game's tone.
+- **Client VFX + sound.** `RingCollected` fires into nothing. This is the single highest juice-per-hour task on the board — see [GAR Sprint Plan](../sprint-plan.md).
+- Should rings also give a brief speed boost, not just fuel? Revisit after the first playtest.
+- Poofs have no sink. 35 rings × 5 = ~175 Poofs per full run, accumulating with nothing to spend on.
 
-**8-second respawn** — fast enough to feel snappy, slow enough that players can't hover-loop
-the same ring. At 4/sec drain, one ring extends a run by 6.25 seconds of extra flight.
+## Related
 
-## Open questions / follow-up
-- [ ] Client VFX for ring collection (sparkle, pop, sound) — `RingCollected` RemoteEvent is
-  already fired, needs a client LocalScript to consume it
-- [ ] Procedural / scripted ring placement vs. manual Studio placement — manual for now
-- [ ] Should rings also briefly boost speed (not just fuel)? TBD after first playtest
-- [ ] Poofs spend mechanic — what do Poofs unlock? (currency design is separate)
+[GAR Fuel System](fuel-system.md) · [GAR Game Map](game-map.md) · [GAR ProcGen Corridor](proc-gen.md) · [Forest Segment Authoring Guide](../references/forest-segment-authoring.md)

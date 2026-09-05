@@ -1,228 +1,250 @@
 -- ============================================================
 -- ProcGenManager.server.lua  (ServerScriptService — Script)
--- Treadmill segment manager: keeps a recycling window of N hand-authored
--- segment Models alive so a run feels infinite without storing infinite geometry.
+-- Forward-streaming corridor generator.
 --
--- Corridor convention (v1): runs along world +Z. A segment's entry face is at its
--- pivot; its exit face is at pivot + (0,0,SEGMENT_LENGTH). The client forward-locks
--- the player's heading to +Z (see Client.client.lua), so the player always makes
--- forward progress and the boundary poll always eventually fires.
+-- The player flies continuously along world +Z. Sections load in AHEAD of the
+-- player and unload BEHIND them — no teleporting, no world-shifting. Because a
+-- run is fuel-bounded (~5000 studs), coordinates stay small enough that float
+-- precision is a non-issue, so the old teleport-treadmill (which fought the
+-- client's network ownership of the HumanoidRootPart and caused the stutter) is
+-- gone entirely.
 --
--- v1 scope: single biome (Forest), single active runner, destroy+clone (no pooling).
+-- Each "section" = one floor segment (Forest_A/B/C from ServerStorage) tiled at
+-- 500-stud intervals, plus one universal canyon-wall set cloned alongside it.
+--
+-- Alignment is done by each template's `floor` Part (250 x 500), NOT the model
+-- pivot — the authored pivots are inconsistent (A at entry, B/C at exit), so
+-- floor-edge alignment is the only reliable way to tile them seamlessly.
+--
+-- v1 scope: single biome (Forest), single active runner, clone+destroy (pooling
+-- is a future optimization if heavy-mesh clones ever hitch despite the lookahead).
 -- ============================================================
 
 local Players             = game:GetService("Players")
 local RunService          = game:GetService("RunService")
 local ReplicatedStorage   = game:GetService("ReplicatedStorage")
 local ServerStorage       = game:GetService("ServerStorage")
-local ServerScriptService = game:GetService("ServerScriptService")
 
-local GameEvents      = require(ServerScriptService:WaitForChild("GameEvents"))
-local SegmentRegistry = require(ReplicatedStorage:WaitForChild("SegmentRegistry"))
+local SegmentRegistry  = require(ReplicatedStorage:WaitForChild("SegmentRegistry"))
+local GameEvents       = require(game:GetService("ServerScriptService"):WaitForChild("GameEvents"))
 local gliderEquipEvent = ReplicatedStorage:WaitForChild("GliderEquipClient")
 
-local SEGMENT_LENGTH    = 500                    -- studs; Z depth of each segment template
-local WINDOW_SIZE       = 3                       -- segments alive at once
-local ALTITUDE_VARIANCE = 15                      -- ± studs of vertical shift per new segment
-local MAX_ALT_DRIFT     = 30                      -- clamp cumulative drift around baseY (anti random-walk)
-local BIOME             = "Forest"                -- v1 hardcoded; v2 reads biomeSchedule
-local FALLBACK_ORIGIN   = Vector3.new(0, 100, 0)  -- used if no RunCorridorOrigin marker is present
+local SEGMENT_LENGTH   = 500                    -- studs; floor Z-depth of each template
+-- SECTIONS_AHEAD must keep the spawn boundary BEYOND the fog horizon so sections
+-- always materialize inside the haze, never in clear air. AtmosphereController's
+-- Forest haze fully obscures well under 2000 studs; 4 sections = 2000-stud
+-- lookahead gives comfortable margin at the ~90 studs/sec airspeed cap.
+local SECTIONS_AHEAD   = 4                       -- sections kept loaded beyond the player
+local SECTIONS_BEHIND  = 1                       -- sections kept behind (look-back buffer)
+local BIOME            = "Forest"                -- v1 hardcoded
+local FALLBACK_ORIGIN  = Vector3.new(0, 100, 0)  -- used if no RunCorridorOrigin marker
+local CHECK_INTERVAL   = 0.2                      -- seconds between stream ticks
+local CONTAINER_NAME   = "StreamedCorridor"       -- Workspace folder holding live sections
+
+-- Template authoring frame (see gar-docs): floors authored centered on X=0 with
+-- their top surface at Y≈99.5; the wall set is authored to line section-0 (floor
+-- entry at Z=0). Only the walls need these constants; floors self-align via `floor`.
+local AUTHORED_X          = 0
+local AUTHORED_FLOOR_TOP  = 99.5
+local AUTHORED_WALL_ENTRY = 0
 
 -- ── State ────────────────────────────────────────────────────────────────────
-local activeSegments    = {}    -- ordered list; index 1 = tail (oldest), #list = front (newest)
-local lastPickedSegment = nil   -- avoid back-to-back repeats
-local activeRunner      = nil   -- single player whose run drives the treadmill (v1)
-local originPos         = nil   -- resolved corridor entry position
-local baseY             = nil   -- corridor baseline altitude (originPos.Y)
+local sections      = {}    -- ordered by entryZ ascending; { floor, walls, entryZ, exitZ }
+local nextEntryZ    = nil    -- entry Z of the next section to spawn
+local lastFloorName = nil    -- avoid back-to-back repeats
+local activeRunner  = nil    -- single player driving the stream (v1)
+local originPos     = nil    -- corridor entry position (from marker)
+local container     = nil    -- Workspace folder for live sections
 
--- ── Origin resolution ──────────────────────────────────────────────────────
+-- ── Origin ───────────────────────────────────────────────────────────────────
 local function resolveOrigin()
 	local marker = workspace:FindFirstChild("RunCorridorOrigin")
 	if marker and marker:IsA("BasePart") then
 		originPos = marker.Position
 	else
 		originPos = FALLBACK_ORIGIN
-		warn(("[ProcGen] No RunCorridorOrigin marker found — using fallback %s")
-			:format(tostring(FALLBACK_ORIGIN)))
+		warn(("[ProcGen] No RunCorridorOrigin marker — using fallback %s"):format(tostring(FALLBACK_ORIGIN)))
 	end
-	baseY = originPos.Y
 end
 
 -- ── Template lookup (defensive) ──────────────────────────────────────────────
-local function getTemplate(name)
-	local root        = ServerStorage:FindFirstChild("SegmentTemplates")
-	local biomeFolder = root and root:FindFirstChild(BIOME)
-	local template    = biomeFolder and biomeFolder:FindFirstChild(name)
-	if not template then
-		warn(("[ProcGen] Missing segment template %s/%s"):format(BIOME, name))
-	end
-	return template
+local function getFloorTemplate(name)
+	local root  = ServerStorage:FindFirstChild("SegmentTemplates")
+	local biome = root and root:FindFirstChild(BIOME)
+	local t      = biome and biome:FindFirstChild(name)
+	if not t then warn(("[ProcGen] Missing floor template %s/%s"):format(BIOME, name)) end
+	return t
 end
 
--- ── Segment selection (no back-to-back repeat when pool has > 1) ─────────────
-local function pickSegmentName(pool, lastPicked)
+local function getWallTemplate()
+	local wallName = SegmentRegistry[BIOME] and SegmentRegistry[BIOME].walls
+	if not wallName then return nil end
+	local root  = ServerStorage:FindFirstChild("WallTemplates")
+	local biome = root and root:FindFirstChild(BIOME)
+	local t      = biome and biome:FindFirstChild(wallName)
+	if not t then warn(("[ProcGen] Missing wall template %s/%s"):format(BIOME, tostring(wallName))) end
+	return t
+end
+
+-- ── Floor selection (no back-to-back repeat when pool has > 1) ───────────────
+local function pickFloorName()
+	local pool = SegmentRegistry[BIOME].segments
 	local candidates = {}
 	for _, name in pool do
-		if name ~= lastPicked then
-			table.insert(candidates, name)
-		end
+		if name ~= lastFloorName then table.insert(candidates, name) end
 	end
 	if #candidates == 0 then candidates = pool end
-	return candidates[math.random(1, #candidates)]
+	local name = candidates[math.random(1, #candidates)]
+	lastFloorName = name
+	return name
 end
 
--- ── Real X-axis mirror ───────────────────────────────────────────────────────
--- Reflect each part across the segment pivot's local YZ-plane. Stores an improper
--- (det = -1) rotation matrix via the 12-arg CFrame.new — valid for rendering static
--- Part geometry. NOTE: MeshParts/Unions reposition but don't truly mirror their mesh;
--- acceptable for v1 (segments are Part-built per proc-gen.md). Assumes anchored parts.
-local function mirrorModelAcrossPivot(model)
-	local P    = model:GetPivot()
-	local Pinv = P:Inverse()
-	for _, part in model:GetDescendants() do
-		if part:IsA("BasePart") then
-			local rel = Pinv * part.CFrame
-			local x, y, z, r00, r01, r02, r10, r11, r12, r20, r21, r22 = rel:GetComponents()
-			local mirrored = CFrame.new(-x, y, z,
-				 r00, -r01, -r02,
-				-r10,  r11,  r12,
-				-r20,  r21,  r22)
-			part.CFrame = P * mirrored
-		end
+-- ── Placement ────────────────────────────────────────────────────────────────
+-- Align a floor clone so its floor Part's entry edge (min Z) sits at world Z=entryZ,
+-- centered on the corridor X, with the floor top at the corridor Y. PivotTo(pivot +
+-- delta) translates the whole model rigidly, so we don't care where the pivot is.
+local function alignFloorTo(clone, entryZ)
+	local geo   = clone:FindFirstChild("Geometry")
+	local floor = geo and geo:FindFirstChild("floor")
+	if not floor then
+		clone:PivotTo(CFrame.new(originPos.X, originPos.Y, entryZ))
+		return
+	end
+	local floorEntryZ = floor.Position.Z - floor.Size.Z / 2
+	local floorTopY   = floor.Position.Y + floor.Size.Y / 2
+	local delta = Vector3.new(
+		originPos.X - floor.Position.X,
+		(originPos.Y - 0.5) - floorTopY,   -- floor top just under the corridor origin
+		entryZ - floorEntryZ
+	)
+	clone:PivotTo(clone:GetPivot() + delta)
+end
+
+-- Wall set is one template authored for section-0; shift by the corridor origin
+-- (X/Y) plus the section's Z. Keeps the canyon lining every streamed section.
+local function placeWalls(wallClone, entryZ)
+	local delta = Vector3.new(
+		originPos.X - AUTHORED_X,
+		(originPos.Y - 0.5) - AUTHORED_FLOOR_TOP,
+		entryZ - AUTHORED_WALL_ENTRY
+	)
+	wallClone:PivotTo(wallClone:GetPivot() + delta)
+end
+
+-- ── Spawn / cull ─────────────────────────────────────────────────────────────
+local wallTemplate  -- resolved once per run in buildInitial
+
+local function spawnSection(entryZ)
+	local floorTemplate = getFloorTemplate(pickFloorName())
+	if not floorTemplate then return end
+
+	local floorClone = floorTemplate:Clone()
+	alignFloorTo(floorClone, entryZ)
+	floorClone.Parent = container
+
+	local wallClone
+	if wallTemplate then
+		wallClone = wallTemplate:Clone()
+		placeWalls(wallClone, entryZ)
+		wallClone.Parent = container
+	end
+
+	table.insert(sections, { floor = floorClone, walls = wallClone, entryZ = entryZ, exitZ = entryZ + SEGMENT_LENGTH })
+	print(("[ProcGen] Section spawned at Z=%.0f (%s)"):format(entryZ, floorClone.Name))
+end
+
+local function destroySection(section)
+	if section.floor then section.floor:Destroy() end
+	if section.walls then section.walls:Destroy() end
+end
+
+-- Spawn at most one section per tick (isolates the heavy-mesh clone cost).
+local function ensureAhead(playerZ)
+	if nextEntryZ <= playerZ + SECTIONS_AHEAD * SEGMENT_LENGTH then
+		spawnSection(nextEntryZ)
+		nextEntryZ += SEGMENT_LENGTH
 	end
 end
 
--- ── Spawn one segment at a given entry position ──────────────────────────────
-local function spawnSegmentAt(entryPos)
-	local pool = SegmentRegistry[BIOME].segments
-	local name = pickSegmentName(pool, lastPickedSegment)
-	lastPickedSegment = name
-
-	local template = getTemplate(name)
-	if not template then return nil end
-
-	local clone = template:Clone()
-	clone.Parent = workspace
-	clone:PivotTo(CFrame.new(entryPos))   -- identity orientation, +Z corridor
-
-	local mirrored = math.random() < 0.5
-	if mirrored then mirrorModelAcrossPivot(clone) end
-
-	print(("[ProcGen] Spawned %s%s at Z=%.0f Y=%.0f")
-		:format(name, mirrored and " (mirrored)" or "", entryPos.Z, entryPos.Y))
-	return clone, name
-end
-
--- Bounded altitude variance around the corridor baseline (prevents random-walk drift).
-local function nextAltitude(prevY)
-	return math.clamp(prevY + math.random(-ALTITUDE_VARIANCE, ALTITUDE_VARIANCE),
-		baseY - MAX_ALT_DRIFT, baseY + MAX_ALT_DRIFT)
-end
-
--- ── Window lifecycle ─────────────────────────────────────────────────────────
-local function destroyWindow()
-	for _, seg in activeSegments do
-		if seg then seg:Destroy() end
+local function cullBehind(playerZ)
+	while sections[1] and sections[1].exitZ < playerZ - SECTIONS_BEHIND * SEGMENT_LENGTH do
+		destroySection(table.remove(sections, 1))
 	end
-	table.clear(activeSegments)
-	lastPickedSegment = nil
 end
 
-local function buildWindow()
-	destroyWindow()  -- guard against a stale window
-	local z     = originPos.Z
-	local prevY = baseY
-	for i = 1, WINDOW_SIZE do
-		local y = (i == 1) and baseY or nextAltitude(prevY)
-		prevY = y
-		local seg = spawnSegmentAt(Vector3.new(originPos.X, y, z))
-		if seg then table.insert(activeSegments, seg) end
-		z += SEGMENT_LENGTH
+-- ── Run lifecycle ────────────────────────────────────────────────────────────
+local function teardown(player)
+	if activeRunner ~= player then return end
+	for _, section in sections do destroySection(section) end
+	table.clear(sections)
+	if container then container:Destroy(); container = nil end
+	nextEntryZ, lastFloorName, wallTemplate = nil, nil, nil
+	activeRunner = nil
+	print(("[ProcGen] Corridor torn down for %s"):format(player.Name))
+end
+
+local function buildInitial()
+	-- Runtime-only cleanup: the streamer owns the corridor, so remove the
+	-- hand-placed start copies (edit-mode scene keeps them for authoring).
+	for _, name in { "Forest_A", "Forest_Walls" } do
+		local static = workspace:FindFirstChild(name)
+		if static then static:Destroy() end
 	end
-	print(("[ProcGen] Window built — %d segments from Z=%.0f"):format(#activeSegments, originPos.Z))
+
+	container = Instance.new("Folder")
+	container.Name = CONTAINER_NAME
+	container.Parent = workspace
+
+	wallTemplate  = getWallTemplate()
+	nextEntryZ    = originPos.Z
+	lastFloorName = nil
+
+	-- Fill the initial window synchronously (player is stationary at deploy, so a
+	-- brief build cost here is unnoticeable vs. mid-flight).
+	for _ = 1, SECTIONS_AHEAD do
+		spawnSection(nextEntryZ)
+		nextEntryZ += SEGMENT_LENGTH
+	end
+	print(("[ProcGen] Corridor built — %d sections from Z=%.0f"):format(#sections, originPos.Z))
 end
 
--- ── Recycle (player cleared the oldest segment's exit boundary) ──────────────
-local function recycle()
+-- ── Stream tick ──────────────────────────────────────────────────────────────
+local accumulator = 0
+RunService.Heartbeat:Connect(function(dt)
 	if not activeRunner then return end
+	accumulator += dt
+	if accumulator < CHECK_INTERVAL then return end
+	accumulator = 0
+
 	local char = activeRunner.Character
 	local hrp  = char and char:FindFirstChild("HumanoidRootPart")
 	if not hrp then return end
-	if #activeSegments == 0 then return end
 
-	local offset = Vector3.new(0, 0, -SEGMENT_LENGTH)
-
-	-- 1. Teleport player back (LinearVelocity is a constraint, so velocity is preserved)
-	hrp.CFrame = hrp.CFrame + offset
-
-	-- 2. Shift all active segments by the same offset — world stays consistent
-	for _, seg in activeSegments do
-		seg:PivotTo(seg:GetPivot() + offset)
-	end
-
-	-- 3. Keep GliderHandler's distance tracking accurate after the teleport
-	GameEvents.RunOffsetApplied:Fire(activeRunner, offset)
-
-	-- 4. Destroy the tail (oldest) segment
-	local tail = table.remove(activeSegments, 1)
-	if tail then tail:Destroy() end
-
-	-- 5. Spawn a fresh segment ahead of the current front
-	local front      = activeSegments[#activeSegments]
-	if not front then return end
-	local frontPivot = front:GetPivot().Position
-	local y          = nextAltitude(frontPivot.Y)
-	local newSeg     = spawnSegmentAt(Vector3.new(originPos.X, y, frontPivot.Z + SEGMENT_LENGTH))
-	if newSeg then table.insert(activeSegments, newSeg) end
-end
-
--- ── Boundary poll ────────────────────────────────────────────────────────────
-RunService.Heartbeat:Connect(function()
-	if not activeRunner then return end
-	local char = activeRunner.Character
-	local hrp  = char and char:FindFirstChild("HumanoidRootPart")
-	if not hrp then return end
-	if #activeSegments == 0 then return end
-
-	-- Threshold = exit face Z of the oldest segment. Cross it → recycle.
-	local threshold = activeSegments[1]:GetPivot().Position.Z + SEGMENT_LENGTH
-	if hrp.Position.Z > threshold then
-		recycle()
-	end
+	local playerZ = hrp.Position.Z
+	ensureAhead(playerZ)
+	cullBehind(playerZ)
 end)
 
--- ── Run start (glider equipped) ──────────────────────────────────────────────
--- Independent connection from GliderHandler; both may listen to the same RemoteEvent.
+-- Run start (glider equipped). Independent connection from GliderHandler.
 gliderEquipEvent.OnServerEvent:Connect(function(player, isEquipped)
 	if not isEquipped then return end
 	if activeRunner then
 		if activeRunner ~= player then
-			print(("[ProcGen] %s deployed while %s owns the treadmill — ignored (v1 single-runner)")
+			print(("[ProcGen] %s deployed while %s owns the corridor — ignored (v1 single-runner)")
 				:format(player.Name, activeRunner.Name))
 		end
 		return
 	end
-
 	activeRunner = player
 	resolveOrigin()
-	buildWindow()
-	print(("[ProcGen] Treadmill started for %s"):format(player.Name))
+	buildInitial()
+	print(("[ProcGen] Corridor stream started for %s"):format(player.Name))
 end)
 
--- ── Run end (stow or fuel depletion both fire RunEnded) ──────────────────────
-local function teardown(player)
-	if activeRunner ~= player then return end
-	destroyWindow()
-	activeRunner = nil
-	print(("[ProcGen] Treadmill torn down for %s"):format(player.Name))
-end
+-- Run end — GliderHandler fires RunEnded for BOTH manual stow and fuel depletion,
+-- so this single trigger covers every way a run can end.
+GameEvents.RunEnded.Event:Connect(teardown)
 
-GameEvents.RunEnded.Event:Connect(function(player)
-	teardown(player)
-end)
+Players.PlayerRemoving:Connect(teardown)
 
-Players.PlayerRemoving:Connect(function(player)
-	teardown(player)
-end)
-
-print("[ProcGen] ProcGenManager ready")
+print("[ProcGen] ProcGenManager ready (forward-streaming)")

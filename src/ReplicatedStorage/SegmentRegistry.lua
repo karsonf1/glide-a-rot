@@ -12,6 +12,10 @@ return {
 	Forest = {
 		segments = { "Forest_A", "Forest_B", "Forest_C" },
 		-- future: per-segment weights for difficulty-based selection
+
+		-- Universal canyon-wall set (Left + Right) cloned once per section.
+		-- Model name under ServerStorage/WallTemplates/<biome>/
+		walls = "Forest_Walls",
 	},
 
 	-- Distance thresholds that switch the active pool. v1 uses Forest only.

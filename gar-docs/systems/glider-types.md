@@ -1,33 +1,48 @@
-# Glider Types
+<!-- Synced from the Obsidian vault (02 - Glide-A-Rot) on 2026-09-05. gar-docs/ is the in-repo source of truth for engineering docs. -->
+
+# GAR Glider Types
+
+**Status:** 🟡 in progress · `src/ReplicatedStorage/GliderConfig.lua`
 
 ## Goal
-Hangglider choice should be a meaningful progression and identity decision for the player, not
-just a cosmetic skin — and should give the social rarity mechanic something visible to react to
-(other players can see what you're flying).
 
-## How it works (high level)
-- 3-4 distinct hangglider types exist (not a single upgradeable glider). Beginner and Advanced
-  tiers are currently defined in `GliderConfig.lua`; Speed and Tank types are planned.
-- Each type has its own base stats (speed, handling) defined in GliderConfig — never hardcoded
-  elsewhere in scripts.
-- Each glider has a slot capacity for equipped rots — see open question on whether this is fixed
-  or variable by tier.
+Glider choice should be a real progression and identity decision, not a skin. It also gives [GAR Social Mechanic](social-mechanic.md) something visible to react to — other players can see what you're flying at a glance.
 
-## Decisions made and why
-- **3-4 distinct types chosen over one upgradeable glider**: gives better progression depth (each
-  unlock feels distinct, not just a stat increase), opens more monetization angles (selling
-  specific gliders or skins per type rather than a single linear upgrade path), and creates more
-  meaningful interaction with the social rarity mechanic — other players can recognize which
-  glider type you're flying at a glance, which a single reskinned glider wouldn't support as well.
-- This was a deliberate trade-off against simplicity: a single upgradeable glider would have been
-  faster to build, but was judged not worth it for the progression and monetization depth lost.
+## How it works
 
-## Open questions
-- Rot slots per glider: fixed across all types, or variable by tier? See [[open-questions]].
-  This directly affects whether GliderConfig needs a `slotCount` field per glider entry.
+`GliderConfig.lua` is the single stat registry. Every value is in degrees for easy Studio-side tuning, and both `GliderController` (client) and `GliderHandler` (server) read from it. Nothing about flight is hardcoded anywhere else.
+
+Adding a tier is three steps: copy an entry and rekey it, add the key to `CreatureDictionary` so it appears in inventory, and place the model in `ReplicatedStorage/GliderModels` named to match `ModelName`.
+
+| | Beginner | Advanced | Elite (templated) |
+|---|---|---|---|
+| MaxSpeed | 80 | 90 | 130 |
+| GlideAngle | −10° | −6° | −4° |
+| TurnSpeed | 90°/s | 140°/s | 200°/s |
+| TurnAcceleration | 3.5 | 5.0 | 7.0 |
+| TurnDecay | 2.5 | 1.8 | 1.2 |
+| RollMultiplier | 28° | 40° | 55° |
+| PitchRange | −20/+5 | −25/+10 | −30/+15 |
+
+`GlideAngle` is the sneaky-important stat: a shallower passive descent means a better lift ratio and a longer glide per unit of fuel, which translates directly into distance and therefore rarity. Advanced isn't just faster than Beginner, it's *more efficient* — that's a better progression feel than a raw speed bump.
+
+`TurnDecay` going *down* with tier is a deliberate difficulty gradient: higher tiers carve longer and require more anticipation. Progression that demands more skill, not less.
+
+## Decisions and why
+
+**3–4 distinct types, not one upgradeable glider.** See [Glider Architecture Decision](../decisions/2026-06-29-glider-architecture.md). Short version: each unlock feels categorically different rather than a stat bump, it opens more monetization surfaces (sell a glider or a skin-per-type rather than one linear upgrade path), and it gives the social mechanic a visible identity signal. Accepted trade-off against build simplicity.
+
+## Open
+
+- **Rot slots per glider — fixed or tier-variable?** [GAR Open Questions](../open-questions.md) #2. Decides whether `GliderConfig` needs a `slotCount` field, and blocks finishing [GAR Inventory and Equipment](inventory-and-equipment.md). Leaning tier-variable, since slots are a more legible reward than raw stats.
+- **The models aren't placed.** `ReplicatedStorage/GliderModels` needs `GliderBeginner` and `GliderAdvanced`. The Blender hangglider import also has unresolved issues: UV stretching on the left wing and an Alpha=0 wing material. See [Blender to Roblox Pipeline](../references/blender-to-roblox-pipeline.md).
+- Speed and Tank types were mentioned early as the 3rd/4th tiers; only Elite exists as a template. Worth reconciling the naming.
 
 ## Depends on / blocks
-- Depends on: nothing (GliderConfig already exists and is stable for the two defined tiers)
-- Blocks: rot slot resolution, inventory hotbar finishing (equip logic needs to know slot count
-  per equipped glider), and the social mechanic (glider type may factor into visible "flex" or
-  recognition between players)
+
+**Depends on:** nothing — the config is stable for the two live tiers.
+**Blocks:** the hotbar (equip logic needs slot count), the social mechanic (visible identity), and the first real playtest (no models = no glider).
+
+## Related
+
+[GAR Flight Mechanics](flight-mechanics.md) · [GAR Monetization](monetization.md) · [GAR Codebase Map](../codebase-map.md)

@@ -1,69 +1,49 @@
-# Fuel System
+<!-- Synced from the Obsidian vault (02 - Glide-A-Rot) on 2026-09-05. gar-docs/ is the in-repo source of truth for engineering docs. -->
 
-_Added: 2026-06-29_
+# GAR Fuel System
+
+**Status:** ✅ built · `src/ServerScriptService/FuelSystem.lua` + `FuelSystemInit.server.lua`
 
 ## Goal
 
-Give gliding a resource-management layer. Without fuel, flying is infinite — no tension, no
-reason to chase rings. Fuel makes every second of air time feel earned and gives rings a
-mechanical purpose beyond aesthetics.
+Give gliding a resource-management layer. Without fuel, flight is infinite — no tension, no reason to chase rings. Fuel makes air time feel earned and gives [GAR Ring System](ring-system.md) a mechanical purpose beyond decoration.
+
+**Fuel is the run timer.** Anything that should extend a run — rings, upgrades, monetization — routes through fuel rather than adding a second clock.
 
 ## How it works
 
-### Drain
-- Each player starts a run with **100 fuel** (FUEL_MAX in FuelSystem.lua)
-- While the glider is deployed, fuel drains at **4 units/sec** (FUEL_DRAIN_PER_SECOND)
-- That gives ~25 seconds of unassisted flight at full tank
+**Drain.** Every run starts at `FUEL_MAX = 100`. While the glider is deployed, fuel drains at `FUEL_DRAIN_PER_SECOND = 4` — about 25 seconds of unassisted flight on a full tank.
 
-### Depletion
-- When fuel hits 0, `FuelSystem` fires `GameEvents.FuelDepleted`
-- `GliderHandler` listens and runs the same end-run cleanup as a manual stow:
-  - Clears `runStarts[player]` and `activeGliders[player]`
-  - Computes horizontal distance
-  - Fires `GameEvents.RunEnded` → triggers crate roll
-- Guard in GliderHandler prevents double-fire if manual stow beats depletion to the cleanup
+**Depletion.** At 0, `FuelSystem` fires `GameEvents.FuelDepleted`. `GliderHandler` listens and runs the same end-run cleanup as a manual stow: clears `runStarts[player]` and `activeGliders[player]`, computes horizontal distance, fires `GameEvents.RunEnded` → triggers the crate roll. A guard prevents a double-fire if a manual stow beats depletion to the cleanup.
 
-### Refuel
-- `FuelSystem.Refuel(player, amount)` adds fuel, clamped to FUEL_MAX
-- Called by RingSystem (+25 per ring) — see ring-system.md
-- Future: could be called by other refuel sources (power-ups, landing pads, etc.)
+**Refuel.** `FuelSystem.Refuel(player, amount)` adds fuel clamped to `FUEL_MAX`. Currently only called by `RingSystem` at +25 per ring. Future refuel sources (power-ups, landing pads) plug in the same way.
 
-### Client visibility
-- `FuelUpdate` RemoteEvent fires every tick and on refuel
-- Client reads it to display a fuel bar / gauge in the HUD
+**Client visibility.** `FuelUpdate` fires every tick and on refuel. **Nothing consumes it yet** — the HUD fuel gauge is unbuilt, which means the player currently flies a timed run with no visible timer. That's a real playability gap, not a polish item.
 
-## Key file paths
-```
-src/ServerScriptService/FuelSystem.lua          ← core drain/refuel module
-src/ServerScriptService/FuelSystemInit.server.lua ← creates FuelUpdate RemoteEvent, calls Init
-src/ServerScriptService/GameEvents.lua          ← FuelDepleted BindableEvent defined here
-src/ServerScriptService/GliderHandler.server.lua ← listens to FuelDepleted, ends run
-```
+## Constants
 
-## Constants (tune here)
-| Constant | Value | Notes |
+| Constant | Value | Effect |
 |---|---|---|
-| FUEL_MAX | 100 | Max fuel; also starting fuel per run |
-| FUEL_DRAIN_PER_SECOND | 4 | Units drained per second while deployed |
-| (in RingSystem) RING_FUEL_REFILL | 25 | Fuel added per ring touch |
+| `FUEL_MAX` | 100 | Max and starting fuel |
+| `FUEL_DRAIN_PER_SECOND` | 4 | ~25s unassisted flight |
+| `RING_FUEL_REFILL` (in RingSystem) | 25 | +6.25s of flight per ring |
 
-At current values: 4 rings = full tank, unassisted flight ≈ 25s, ring-to-ring gap ≤ 25s is
-the design constraint for ring placement.
+At these values, 4 rings = a full tank, and **ring-to-ring gaps of ≤25s are the design constraint** for map layout.
 
-## Decisions made and why
+## Decisions and why
 
-**Per-player fuel, not per-run fuel on the glider object** — cleaner to track in a server
-module table than on the glider part; avoids sync issues when glider model isn't yet placed.
+**Per-player fuel in a server module table, not on the glider object.** Cleaner to track, and avoids sync issues while the glider model still isn't placed.
 
-**Drain loop is a task.spawn thread, not a heartbeat** — 1-second granularity is fine for
-fuel (players won't notice 1s jitter). A Heartbeat connection at 60fps for a 1/sec drain
-is wasteful.
+**Drain runs on a `task.spawn` thread, not a Heartbeat connection.** 1-second granularity is imperceptible for fuel. A 60fps Heartbeat for a per-second drain is wasted budget.
 
-**FuelDepleted fires through GameEvents (BindableEvent), not direct require** — keeps
-FuelSystem decoupled from GliderHandler. Same pattern as RunEnded.
+**`FuelDepleted` goes through `GameEvents` (BindableEvent), not a direct require.** Keeps `FuelSystem` decoupled from `GliderHandler`, same pattern as `RunEnded`. *Note:* this connection was silently broken for a while because it used `FuelDepleted:Connect` instead of `FuelDepleted.Event:Connect` — the fuel→crate chain never fired. Fixed 2026-07-03.
 
-## Open questions / follow-up
-- [ ] HUD fuel bar — client LocalScript needs a fuel gauge listening to FuelUpdate
-- [ ] Should fuel persist between runs (partial tank on respawn) or always reset to 100?
-  Current: always resets to FUEL_MAX on equip.
-- [ ] Balance: 4/sec drain + 25 refill per ring is a first guess — needs in-game tuning
+## Open
+
+- HUD fuel gauge — a client LocalScript listening to `FuelUpdate`. High priority.
+- Should fuel persist between runs, or always reset to 100? Currently always resets.
+- 4/sec drain and +25 per ring are first guesses that have never been playtested.
+
+## Related
+
+[GAR Ring System](ring-system.md) · [GAR Flight Mechanics](flight-mechanics.md) · [GAR Game Map](game-map.md) · [GAR Crate System](crate-system.md)

@@ -70,6 +70,13 @@ local updateInventoryEvent = ReplicatedStorage:WaitForChild("UpdateInventoryClie
 print("[Inventory] UpdateInventoryClient OK")
 local equipCreatureEvent   = ReplicatedStorage:WaitForChild("EquipCreatureClient")
 print("[Inventory] EquipCreatureClient OK")
+-- Holding a rot (renders it in-hand) is a separate action from assigning a slot.
+local holdCreatureEvent    = ReplicatedStorage:WaitForChild("HoldCreatureClient", 10)
+if holdCreatureEvent then
+	print("[Inventory] HoldCreatureClient OK")
+else
+	warn("[Inventory] HoldCreatureClient not found — hotkey hold disabled")
+end
 local hotbarActivateEvent  = ReplicatedStorage:WaitForChild("HotbarSlotActivated", 5)
 if hotbarActivateEvent then
 	print("[Inventory] HotbarSlotActivated OK")
@@ -621,8 +628,12 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
 		print("[Inventory] Hotkey", slotIndex, "— slot empty")
 		return
 	end
-	print("[Inventory] Hotkey", slotIndex, "— activating", name)
-	equipCreatureEvent:FireServer(name, slotIndex)
+	print("[Inventory] Hotkey", slotIndex, "— holding", name)
+	-- Activating a hotbar slot HOLDS that rot (server resolves the instance and
+	-- renders it in-hand). Slot ASSIGNMENT is separate (drag-drop -> commitEquip).
+	if holdCreatureEvent then
+		holdCreatureEvent:FireServer(name)
+	end
 	if hotbarActivateEvent then
 		hotbarActivateEvent:Fire({ InternalName = name, SlotIndex = slotIndex })
 	end
