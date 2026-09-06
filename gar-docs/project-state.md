@@ -4,9 +4,9 @@
 
 The live status board for [Glide-A-Rot](_index.md). This is the note to read first in any GAR session. Terse and current — the "why" behind anything here lives in the relevant GAR Systems note or GAR Decisions entry.
 
-**Last verified against the repo:** 2026-07-26 (read from source + git log, not from a stale doc)
+**Last verified:** 2026-09-05 (source, Git, Studio editor buffers and reopened local place)
 **Repo:** `C:\Users\karso\Desktop\Glide-A-Rot!` · `github.com/karsonf1/glide-a-rot` (main)
-**HEAD:** `743fa55` — *Rewrite ProcGen as forward streamer + integrate canyon walls* (2026-07-03)
+**Claude/Codex boundary on main:** `f5c2a64` — PR #3. Inherited code, docs and authored place are preserved. Subsequent Codex work is on `codex/corridor-sync-and-rendering`; see [session record](sessions/2026-09-05-codex-handoff.md).
 **Scale of codebase:** ~7,700 lines of Luau across 30 script files.
 
 ---
@@ -15,7 +15,7 @@ The live status board for [Glide-A-Rot](_index.md). This is the note to read fir
 
 5-week MVP target. Currently in the **map + procgen** stretch — scripting is well ahead of art and world-building, which is the persistent shape of this project.
 
-**This week's focus:** author Forest_B and Forest_C to the segment convention, resolve player↔corridor coupling, and get the first end-to-end streaming playtest on the board.
+**Current focus:** verify the synchronized baseline in Play, place ring routes, resolve player/corridor coupling, then test one distant-scenery prototype. See [rendering proposal](proposals/2026-09-05-corridor-rendering.md).
 
 ---
 
@@ -30,11 +30,11 @@ The live status board for [Glide-A-Rot](_index.md). This is the note to read fir
 | Crate / rot award | ✅ done | `CrateSystem.server.lua` | Fires on `RunEnded`; awards `{Species, Rarity, Income}` |
 | Rot data storage | ✅ done | `PlayerData.lua` | DataStore `PlayerData_V4`; 81-slot cap; V3 migration |
 | Rarity tier system | ✅ done | `RarityDistribution.lua` | 6 tiers, distance-Gaussian, `MAX_DISTANCE = 5000` |
-| Atmosphere / haze | ✅ done | `AtmosphereController.client.lua` | Built to hide the streaming spawn boundary; v2 biome hook pre-wired but dormant |
-| ProcGen corridor | 🟡 in progress | `ProcGenManager.server.lua` | **Rewritten as a forward streamer** (see [Forward Streamer over Treadmill](decisions/2026-07-03-forward-streamer-over-treadmill.md)). Forest_A authored; B/C still floor-only stubs |
+| Atmosphere / haze | 🟡 needs visual verification | `AtmosphereController.client.lua` | Rojo client path corrected; now present in local Studio. Haze has no guaranteed distance cutoff |
+| ProcGen corridor | 🟡 in progress | `ProcGenManager.server.lua` | Forward streamer; all A/B/C templates have scenery. Lookup corrected to actual ReplicatedStorage roots; no rings authored in their Rings folders |
 | Glider type system | 🟡 in progress | `GliderConfig.lua` | Beginner + Advanced tuned; Elite commented template; models need placing in `ReplicatedStorage/GliderModels` |
 | Inventory hotbar | 🟡 in progress | `EquipmentHandler.server.lua` + `InventoryUI` | Equip validation works; rot-to-slot assignment not functional |
-| Game map | 🟡 in progress | `.rbxlx` (not Rojo) | Forest_A aligned to corridor origin; canyon walls streaming |
+| Game map | 🟡 in progress | `HangglideARot.rbxl` (authored content not Rojo) | Saved scene verified. Templates in ReplicatedStorage; StreamingEnabled=false. Runtime flight remains untested |
 | Ring collection VFX | 🔴 not started | — | `RingCollected` RemoteEvent already fires; no client consumer |
 | Social rot-rarity mechanic | 🔴 not started | — | Design fork unresolved — see [GAR Open Questions](open-questions.md) |
 | Passive idle income | 🔴 not started | — | `rot.Income` already baked; needs ticker + last-seen timestamp |
@@ -47,10 +47,11 @@ Status key: 🔴 not started · 🟡 in progress · ✅ done
 
 ## Current Blockers
 
-1. **Stale `.git/index.lock`.** A git process on the machine holds it and the sandbox can't remove it. Nothing commits until this is cleared. *Note: the trivia-game repo has the identical problem — this is a machine-level habit, not a one-off.*
-2. **Uncommitted place-file work.** Forest_A geometry, the `RunCorridorOrigin` marker, spawn placement, and the ServerStorage segment templates live only inside `HangglideARot.rbxlx`. ServerStorage is **not** in the Rojo tree, so those changes only persist via Ctrl+S in Studio → commit the `.rbxlx`.
-3. **Player ↔ corridor coupling.** ProcGen builds the corridor at `RunCorridorOrigin` on deploy, but nothing binds the player's position or heading to it. Current stopgap: the SpawnLocation sits at `(0, 103, −12)` facing +Z so players naturally launch onto section 0.
-4. **Forest_B / Forest_C are floor-only stubs.** The streamer picks randomly from a three-name pool where two entries are empty floors — variety is currently fake.
+1. **Baseline playtest pending.** The stale Git lock was cleared and PR #3 merged. The saved place and source had drifted; Codex corrected template lookup and the Rojo client path. Building validates packaging only.
+2. **Place saving remains manual.** Geometry and templates live in `HangglideARot.rbxl`; source changes alone do not update that file. Save the local Studio tab after syncing.
+3. **Player ↔ corridor coupling.** Launch placement and multiplayer ownership remain unresolved. The inspected spawn is `(0, 338, -12)` and the origin is `(0, 100, 0)`, not the old documented spawn height.
+4. **No authored rings.** All three template Rings folders are empty. The separate ring asset exists, but RingSystem's cooldown currently makes its invisible hitbox visible/collidable; fix this before ring playtesting.
+5. **Rendering cause unproven.** Instance streaming is off. Measure actual client generation, mesh downloads and graphics behavior before choosing LOD distances; see the proposal.
 
 ---
 
@@ -60,7 +61,7 @@ Status key: 🔴 not started · 🟡 in progress · ✅ done
 
 **Gliders defined:** Beginner (80 studs/sec, −10° glide, 90°/s turn), Advanced (90 studs/sec, −6° glide, 140°/s turn). Elite exists as a commented template.
 
-**Segments authored:** 1 of 3 (Forest_A). Wall set: `Forest_Walls` (universal, streams per section).
+**Segments present:** Forest_A (412 parts), Forest_B (324), Forest_C (412), each with a 250 x 1 x 500 floor. Wall set: `Forest_Walls` (6 mesh parts). These are under ReplicatedStorage, outside source-managed geometry. Counts confirm scenery exists, not that layouts are sufficiently varied.
 
 ---
 

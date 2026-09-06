@@ -17,10 +17,14 @@
       "$ignoreUnknownInstances": true,
       "$path": "src/StarterGui"
     },
-    "StarterPlayerScripts": {
-      "$className": "StarterPlayerScripts",
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
       "$ignoreUnknownInstances": true,
-      "$path": "src/StarterPlayerScripts"
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "$ignoreUnknownInstances": true,
+        "$path": "src/StarterPlayerScripts"
+      }
     },
     "Workspace": {
       "$className": "Workspace",

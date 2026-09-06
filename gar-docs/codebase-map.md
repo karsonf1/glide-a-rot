@@ -2,6 +2,8 @@
 
 # GAR Codebase Map
 
+**2026-09-05 correction:** Rojo now maps client scripts under StarterPlayer/StarterPlayerScripts. `CorridorPreload.client.lua` warms assets from the saved place's ReplicatedStorage template folders. The compatible repository flight controller remains active; a divergent Studio physics draft is archived under `handoff/2026-09-05-studio` because its required GliderConfig fields are missing. Authored geometry is in `HangglideARot.rbxl`; ServerStorage is not the current template location.
+
 Every script in [Glide-A-Rot](_index.md), what it owns, and what it talks to. ~7,700 lines of Luau across 30 files. Read this before asking "where does X live" — and update it when a file is added or gutted.
 
 **Root:** `C:\Users\karso\Desktop\Glide-A-Rot!\src`

@@ -1,9 +1,9 @@
 -- ============================================================
 -- SegmentRegistry.lua  (ReplicatedStorage — ModuleScript)
--- Segment pool configuration for ProcGenManager's treadmill.
+-- Segment pool configuration for ProcGenManager's forward streamer.
 --
 -- Segment names must match Model names under
---   ServerStorage/SegmentTemplates/<biome>/
+--   ReplicatedStorage/SegmentTemplates/<biome>/
 --
 -- v1: Forest only. Biome switching reads biomeSchedule in v2.
 -- ============================================================
@@ -14,7 +14,7 @@ return {
 		-- future: per-segment weights for difficulty-based selection
 
 		-- Universal canyon-wall set (Left + Right) cloned once per section.
-		-- Model name under ServerStorage/WallTemplates/<biome>/
+		-- Model name under ReplicatedStorage/WallTemplates/<biome>/
 		walls = "Forest_Walls",
 	},
 
