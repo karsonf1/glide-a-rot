@@ -2,6 +2,8 @@
 
 # GAR Codebase Map
 
+**2026-09-06 movement prototype:** `ReplicatedStorage/FlightDynamics.lua` is the pure numeric thruster integrator; `GliderConfig.Flight` holds controls/camera/pose tuning and per-tier thrust/drag is under Gliders. `StarterPlayerScripts/FlightPresentation.lua` renders local thruster pods and procedural joint transforms. `Client.client.lua` now separates rendered input, PreSimulation motion and render-step camera; it listens to server FuelUpdate for cleanup. `ReplicatedStorage/AtmosphereConfig.lua` owns the reduced-fog profiles. See the thruster decision note for the current behavior; the legacy controller descriptions below are historical.
+
 **2026-09-05 correction:** Rojo now maps client scripts under StarterPlayer/StarterPlayerScripts. `CorridorPreload.client.lua` warms assets from the saved place's ReplicatedStorage template folders. The compatible repository flight controller remains active; a divergent Studio physics draft is archived under `handoff/2026-09-05-studio` because its required GliderConfig fields are missing. Authored geometry is in `HangglideARot.rbxl`; ServerStorage is not the current template location.
 
 Every script in [Glide-A-Rot](_index.md), what it owns, and what it talks to. ~7,700 lines of Luau across 30 files. Read this before asking "where does X live" — and update it when a file is added or gutted.

@@ -5,6 +5,14 @@ Read this first, then `gar-docs/project-state.md`.
 
 ## Codex handoff verification — 2026-09-05
 
+**2026-09-06 update:** synchronization PR #4 is merged at `78d9377`. Current work on
+`codex/thruster-flight-prototype` implements user-selected mouse aim and W thrust /
+release to coast, plus lower camera, procedural pose and reduced fog. Read
+`gar-docs/decisions/2026-09-06-thruster-flight-prototype.md` before changing flight.
+`checks/flight-dynamics.luau` tests pure numerical motion using the official Luau
+CLI; it does not run Roblox or replace a Studio playtest. New source has not yet
+been synchronized to Studio because no instance was connected during implementation.
+
 PR #3 merged at `f5c2a64`, preserving inherited source, docs, and the user-saved
 `HangglideARot.rbxl`. Codex work begins after this boundary on
 `codex/corridor-sync-and-rendering`. See `gar-docs/sessions/2026-09-05-codex-handoff.md`.

@@ -19,23 +19,13 @@
 local Lighting          = game:GetService("Lighting")
 local TweenService      = game:GetService("TweenService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Config = require(ReplicatedStorage:WaitForChild("AtmosphereConfig"))
 
 -- ── Fog profiles (per biome) ─────────────────────────────────────────────────
--- Haze ~0 = none, ~3 = strong horizon fade. These inherited values are a starting
--- point for the client playtest, not a measured 2000-stud visibility guarantee.
--- Tune Haze/Density up if any pop-in still shows; down if it feels claustrophobic.
-local PROFILES = {
-	Forest = {
-		Color   = Color3.fromRGB(198, 205, 200),  -- soft grey-green air column
-		Decay   = Color3.fromRGB(106, 112, 125),  -- cooler tint toward the horizon
-		Density = 0.40,
-		Haze    = 2.6,
-		Offset  = 0.25,
-		Glare   = 0,
-	},
-	-- Desert = { ... },  -- v2: add when the biome schedule goes live
-}
-local DEFAULT_BIOME = "Forest"
+-- The clearer prototype uses Density 0.18 / Haze 0.75 in AtmosphereConfig.
+-- These are art settings, not a guaranteed streaming/render distance cutoff.
+local PROFILES = Config.Profiles
+local DEFAULT_BIOME = Config.DefaultBiome
 
 -- ── Ensure a single Atmosphere instance ─────────────────────────────────────
 -- The place file already ships one (Haze 0); reuse it so we never stack two.
@@ -72,7 +62,7 @@ if biomeChanged and biomeChanged:IsA("RemoteEvent") then
 	biomeChanged.OnClientEvent:Connect(function(biomeName)
 		local p = PROFILES[biomeName]
 		if p then
-			applyProfile(p, 2.0)  -- 2s cross-fade between biome fog looks
+			applyProfile(p, Config.TransitionSeconds)
 		end
 	end)
 end

@@ -1,453 +1,304 @@
-local Players          = game:GetService("Players")
-local ReplicatedStorage= game:GetService("ReplicatedStorage")
-local RunService       = game:GetService("RunService")
+-- Thruster flight prototype: input, simulation and camera run on separate phases.
+-- Fuel, distance measurement and creature rewards remain server-owned.
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
+local GuiService = game:GetService("GuiService")
 
+local GliderConfig = require(ReplicatedStorage:WaitForChild("GliderConfig"))
+local Dynamics = require(ReplicatedStorage:WaitForChild("FlightDynamics"))
+local Presentation = require(script.Parent:WaitForChild("FlightPresentation"))
+local config = GliderConfig.Flight
 local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
-
-local CONFIG = {
-	CameraHeight      = 24,
-	CameraDistance    = 16,
-	CameraLerpFactor  = 5.5,
-	CameraLookAhead   = 18,
-	CameraLookHeight  = -2,
-	MouseSensitivity  = 0.25,
-	InvertMouse       = false,
-	DeployMinHeight   = 8,
-	PromptDuration    = 2.4,
-	DoubleJumpPower   = 52,
-	GliderOffsetY     = 3,
-	MaxDt             = 0.1,
-	CameraFOV         = 66,
-	VisualPitchOffset = -65,   -- steeper nose-down lean; clamped to -82° to avoid gimbal lock
-	SinkRate          = 5,
-	AirDrag           = 3.0,   -- horizontal velocity lerp rate; lower = more air resistance
-	-- Arm pose (degrees, relative to each joint's default C0).
-	-- Negative shoulder pitch swings arm backward in character space → points
-	-- toward the control bar when character is pitched ~65° nose-down.
-	ArmShoulderPitch  = -68,
-	ArmShoulderSpread = 14,
-	ArmElbowBend      = 58,
-	-- Run corridor (ProcGenManager treadmill runs along world +Z).
-	-- The treadmill recycles on +Z progress, so flight must stay forward-biased.
-	YawForwardLock    = true,       -- clamp heading to the +Z run corridor
-	ForwardYaw        = math.pi,    -- yawAngle that maps to +Z travel (Vz = -cos(yaw)*… > 0)
-	MaxYawDeviation   = 90,         -- max steer off +Z: 90° = full lateral, never past into reverse
-}
-
-local GliderConfig        = require(ReplicatedStorage:WaitForChild("GliderConfig"))
-local hotbarActivateEvent = ReplicatedStorage:WaitForChild("HotbarSlotActivated", 10)
-local gliderEquipEvent    = ReplicatedStorage:WaitForChild("GliderEquipClient",   10)
+local equipEvent = ReplicatedStorage:WaitForChild("GliderEquipClient")
+local fuelEvent = ReplicatedStorage:WaitForChild("FuelUpdate")
+local hotbarEvent = ReplicatedStorage:WaitForChild("HotbarSlotActivated", 10)
 
 local character, humanoid, hrp
-
-local flightState = {
-	active=false, statsRef=nil, gliderName=nil, deployY=nil,
-	yawAngle=0, yawRate=0, pitch=0, roll=0,
-	att=nil, lv=nil, ao=nil, heartbeat=nil, gliderModel=nil,
-	camPos=Vector3.zero,
-	currentVelX=0, currentVelZ=0,
-}
-
-local jumpCount     = 0
+local flight
+local characterConnections = {}
 local canDoubleJump = false
-local promptVisible = false
-local promptTimer   = 0
+local windowFocused = true
+local lastFuel
+local promptClock = 0
 
--- Saved Motor6D state for restore on stow
-local poseJoints = {}
+local gui = Instance.new("ScreenGui")
+gui.Name = "ThrusterFlightHUD"
+gui.ResetOnSpawn = false
+gui.Parent = player:WaitForChild("PlayerGui")
 
--- ─────────────────────────────────────────────────────────────────────────────
--- Arm / body pose
--- With PlatformStand=true the Animator freezes, so we can safely overwrite
--- Motor6D.C0 to pose the arms.  We multiply the original C0 by a rotation so
--- it's additive on top of whatever the avatar's default offset is.
--- ─────────────────────────────────────────────────────────────────────────────
--- Helper: weld childPart to parentPart at the given joint rotation,
--- then disable the AnimationConstraint + BallSocket so they don't fight the weld.
--- Works with both the new AnimationConstraint rig and old Motor6D rigs.
-local function poseJoint(parentPart, childPart, animConstraintName, ballSocketName, rotCF)
-	if not parentPart or not childPart then return end
-	local animC = childPart:FindFirstChild(animConstraintName)
-	local ballC = childPart:FindFirstChild(ballSocketName)
-	if not animC then return end  -- joint doesn't exist on this rig
-
-	local att0 = animC.Attachment0  -- attachment on parent
-	local att1 = animC.Attachment1  -- attachment on child
-	if not att0 or not att1 then return end
-
-	-- World CFrame at the joint pivot (parent side)
-	local jointWorldCF   = parentPart.CFrame * att0.CFrame
-	-- Desired world CFrame for the child: place att1 at the rotated joint pivot
-	local desiredChildCF = jointWorldCF * rotCF * att1.CFrame:Inverse()
-
-	-- Weld locks the child to parent at the desired pose
-	local weld = Instance.new("Weld")
-	weld.Part0 = parentPart
-	weld.Part1 = childPart
-	weld.C0 = parentPart.CFrame:Inverse() * desiredChildCF
-	weld.C1 = CFrame.new()
-	weld.Parent = childPart
-
-	-- Disable physics constraints so they don't fight the weld
-	if animC then animC.Enabled = false end
-	if ballC  then ballC.Enabled  = false end
-
-	table.insert(poseJoints, { weld = weld, animC = animC, ballC = ballC })
+local function label(name, y, size)
+	local result = Instance.new("TextLabel")
+	result.Name = name
+	result.AnchorPoint = Vector2.new(0.5, 0.5)
+	result.Position = UDim2.fromScale(0.5, y)
+	result.Size = UDim2.new(0.9, 0, 0, 36)
+	result.BackgroundTransparency = 1
+	result.Font = Enum.Font.GothamMedium
+	result.TextSize = size
+	result.TextColor3 = Color3.fromRGB(230, 244, 255)
+	result.TextStrokeTransparency = 0.4
+	result.Visible = false
+	result.Parent = gui
+	return result
 end
 
-local function beginGliderPose()
-	poseJoints = {}
-	if not character then return end
-	local upperTorso    = character:FindFirstChild("UpperTorso")
-	local leftUpperArm  = character:FindFirstChild("LeftUpperArm")
-	local rightUpperArm = character:FindFirstChild("RightUpperArm")
-	local leftLowerArm  = character:FindFirstChild("LeftLowerArm")
-	local rightLowerArm = character:FindFirstChild("RightLowerArm")
-	if not upperTorso then return end  -- R6 not supported
+local prompt = label("DeployPrompt", 0.7, 18)
+prompt.Text = "F  •  ENGAGE THRUSTERS"
+local status = label("FlightStatus", 0.9, 16)
+local controls = label("Controls", 0.95, 13)
+controls.Text = "MOUSE  AIM     W  THRUST     S  AIRBRAKE     E  END RUN"
 
-	local sp  = CFrame.Angles(math.rad(CONFIG.ArmShoulderPitch), 0, math.rad(-CONFIG.ArmShoulderSpread))
-	local spR = CFrame.Angles(math.rad(CONFIG.ArmShoulderPitch), 0, math.rad( CONFIG.ArmShoulderSpread))
-	local eb  = CFrame.Angles(math.rad(CONFIG.ArmElbowBend), 0, 0)
+-- A fixed aim reference, not a moving cursor. Menus restore the normal pointer.
+local reticle = Instance.new("Frame")
+reticle.Name = "AimReference"
+reticle.AnchorPoint = Vector2.new(0.5, 0.5)
+reticle.Position = UDim2.fromScale(0.5, 0.5)
+reticle.Size = UDim2.fromOffset(4, 4)
+reticle.BackgroundColor3 = Color3.fromRGB(220, 242, 255)
+reticle.BackgroundTransparency = 0.3
+reticle.BorderSizePixel = 0
+reticle.Visible = false
+reticle.Parent = gui
+local corner = Instance.new("UICorner")
+corner.CornerRadius = UDim.new(1, 0)
+corner.Parent = reticle
 
-	poseJoint(upperTorso,    leftUpperArm,  "LeftShoulder",  "LeftShoulderBallSocket",  sp)
-	poseJoint(upperTorso,    rightUpperArm, "RightShoulder", "RightShoulderBallSocket", spR)
-	if leftLowerArm  then poseJoint(leftUpperArm,  leftLowerArm,  "LeftElbow",  "LeftElbowBallSocket",  eb) end
-	if rightLowerArm then poseJoint(rightUpperArm, rightLowerArm, "RightElbow", "RightElbowBallSocket", eb) end
-
-	print("[Glider] Arm pose applied —", #poseJoints, "joints")
+local function inputAvailable()
+	return windowFocused and not GuiService.MenuIsOpen and not UserInputService:GetFocusedTextBox()
 end
 
-local function endGliderPose()
-	for _, j in ipairs(poseJoints) do
-		pcall(function()
-			if j.weld  and j.weld.Parent  then j.weld:Destroy() end
-			if j.animC and j.animC.Parent then j.animC.Enabled = true end
-			if j.ballC and j.ballC.Parent then j.ballC.Enabled = true end
-		end)
-	end
-	poseJoints = {}
-end
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Deploy prompt
--- ─────────────────────────────────────────────────────────────────────────────
-local deployGui = Instance.new("ScreenGui")
-deployGui.Name = "GliderDeployPrompt"
-deployGui.ResetOnSpawn = false
-deployGui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-deployGui.Parent = player.PlayerGui
-
-local deployLabel = Instance.new("TextLabel")
-deployLabel.Size = UDim2.new(0.7, 0, 0.1, 0)
-deployLabel.Position = UDim2.new(0.15, 0, 0.38, 0)
-deployLabel.BackgroundTransparency = 1
-deployLabel.Text = "PRESS  F  TO DEPLOY HANGGLIDER"
-deployLabel.TextColor3 = Color3.fromRGB(176, 224, 255)
-deployLabel.TextStrokeColor3 = Color3.fromRGB(0, 0, 0)
-deployLabel.TextStrokeTransparency = 0
-deployLabel.Font = Enum.Font.GothamBold
-deployLabel.TextScaled = true
-deployLabel.TextXAlignment = Enum.TextXAlignment.Center
-deployLabel.Visible = false
-deployLabel.Parent = deployGui
-
-local function hidePrompt()
-	deployLabel.Visible = false
-	promptVisible = false
-	promptTimer = 0
-end
-
-local function tryShowPrompt()
-	if flightState.active or not hrp then return end
+local function rayParams()
 	local params = RaycastParams.new()
-	params.FilterDescendantsInstances = { character }
 	params.FilterType = Enum.RaycastFilterType.Exclude
-	local result = workspace:Raycast(hrp.Position, Vector3.new(0, -120, 0), params)
-	local height = result and (hrp.Position.Y - result.Position.Y) or 999
-	if height < CONFIG.DeployMinHeight then return end
-	deployLabel.Visible = true
-	promptVisible = true
-	promptTimer = CONFIG.PromptDuration
+	params.FilterDescendantsInstances = character and { character } or {}
+	params.RespectCanCollide = true
+	return params
 end
 
-RunService.Heartbeat:Connect(function(dt)
-	if not promptVisible then return end
-	promptTimer -= dt
-	if promptTimer <= 0 then hidePrompt() end
-end)
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Physics constraints
--- MaxAngularVelocity 500→80: prevents the AlignOrientation from spinning wildly
---   to reach its target, which was the root cause of the corkscrew.
--- Responsiveness 50→20: smoother, weighted-pendulum feel.
--- ─────────────────────────────────────────────────────────────────────────────
-local function createConstraints()
-	local att = Instance.new("Attachment"); att.Name = "GliderAtt"; att.Parent = hrp
-	local lv = Instance.new("LinearVelocity")
-	lv.Attachment0 = att; lv.MaxForce = math.huge
-	lv.ForceLimitMode = Enum.ForceLimitMode.Magnitude
-	lv.RelativeTo = Enum.ActuatorRelativeTo.World
-	lv.VectorVelocity = Vector3.zero; lv.Parent = hrp
-	local ao = Instance.new("AlignOrientation")
-	ao.Attachment0 = att; ao.Mode = Enum.OrientationAlignmentMode.OneAttachment
-	ao.MaxTorque = math.huge; ao.MaxAngularVelocity = 80; ao.Responsiveness = 20
-	ao.Parent = hrp
-	return att, lv, ao
+local function canDeploy()
+	if flight or not hrp or not humanoid or humanoid.Health <= 0 then return false end
+	local hit = workspace:Raycast(hrp.Position, Vector3.new(0, -config.DeployMinHeight, 0), rayParams())
+	return hit == nil
 end
 
-local function destroyConstraints()
-	pcall(function()
-		if flightState.att then flightState.att:Destroy() end
-		if flightState.lv  then flightState.lv:Destroy()  end
-		if flightState.ao  then flightState.ao:Destroy()  end
-	end)
-	flightState.att = nil; flightState.lv = nil; flightState.ao = nil
-end
-
--- ─────────────────────────────────────────────────────────────────────────────
--- Flight
--- ─────────────────────────────────────────────────────────────────────────────
-local function stopFlight()
-	if not flightState.active then return end
-	flightState.active = false; flightState.statsRef = nil
-	flightState.gliderName = nil; flightState.deployY = nil
-	if flightState.heartbeat then flightState.heartbeat:Disconnect(); flightState.heartbeat = nil end
-	endGliderPose()
-	destroyConstraints()
-	if flightState.gliderModel then flightState.gliderModel:Destroy(); flightState.gliderModel = nil end
-	if humanoid then humanoid.PlatformStand = false end
-	jumpCount = 0; canDoubleJump = false; hidePrompt()
-	camera.CameraType = Enum.CameraType.Custom
-	camera.FieldOfView = 70
-	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-	if gliderEquipEvent then gliderEquipEvent:FireServer(false, nil) end
-	print("[Glider] Stowed")
-end
-
-local function startFlight(gliderName)
-	if not character or not humanoid or not hrp then warn("[Glider] Character not ready"); return end
-	if flightState.active and flightState.gliderName == gliderName then stopFlight(); return end
-	if flightState.active then stopFlight() end
-	local stats = GliderConfig.Gliders[gliderName]
-	if not stats then warn("[Glider] No config for:", gliderName); return end
-
-	local lookXZ = Vector3.new(hrp.CFrame.LookVector.X, 0, hrp.CFrame.LookVector.Z)
-	if lookXZ.Magnitude > 0.001 then lookXZ = lookXZ.Unit end
-
-	flightState.active = true; flightState.statsRef = stats
-	flightState.gliderName = gliderName
-	-- Forward lock: launch heading down the +Z corridor instead of the spawn facing.
-	flightState.yawAngle = CONFIG.YawForwardLock and CONFIG.ForwardYaw
-		or math.atan2(-lookXZ.X, -lookXZ.Z)
-	flightState.yawRate = 0; flightState.pitch = stats.GlideAngle
-	flightState.roll = 0; flightState.deployY = hrp.Position.Y
-
-	-- Seed air-drag velocity so there's no jerk on deploy
-	local initCosPitch = math.cos(math.rad(stats.GlideAngle))
-	flightState.currentVelX = -math.sin(flightState.yawAngle) * initCosPitch * stats.MaxSpeed
-	flightState.currentVelZ = -math.cos(flightState.yawAngle) * initCosPitch * stats.MaxSpeed
-
-	humanoid.PlatformStand = true
-	local att, lv, ao = createConstraints()
-	flightState.att = att; flightState.lv = lv; flightState.ao = ao
-
-	-- Apply prone arm pose (defer one frame so PlatformStand state settles)
-	task.defer(beginGliderPose)
-
-	local modelsFolder = ReplicatedStorage:FindFirstChild("GliderModels")
-	if modelsFolder then
-		local template = modelsFolder:FindFirstChild(stats.ModelName or gliderName)
-		if template then
-			local clone = template:Clone()
-			local gliderRoot = clone:FindFirstChild("GliderRoot") or clone.PrimaryPart
-			if gliderRoot then
-				gliderRoot.CFrame = hrp.CFrame * CFrame.new(0, CONFIG.GliderOffsetY, 0)
-				for _, part in ipairs(clone:GetDescendants()) do
-					if part:IsA("BasePart") then
-						part.CanCollide = false; part.Massless = true
-						part.CastShadow = false; part.CanQuery = false
-					end
-				end
-				local weld = Instance.new("WeldConstraint")
-				weld.Part0 = hrp; weld.Part1 = gliderRoot; weld.Parent = gliderRoot
-				clone.Parent = character; flightState.gliderModel = clone
-			else
-				clone:Destroy()
-				warn("[Glider] No GliderRoot in model:", stats.ModelName)
-			end
+local function stopFlight(notifyServer)
+	local current = flight
+	if not current then return end
+	flight = nil
+	RunService:UnbindFromRenderStep("GARFlightInput")
+	RunService:UnbindFromRenderStep("GARFlightCamera")
+	if current.simulation then current.simulation:Disconnect() end
+	current.presentation:Destroy()
+	current.velocity:Destroy()
+	current.orientation:Destroy()
+	current.attachment:Destroy()
+	if current.humanoid.Parent then
+		current.humanoid.PlatformStand = current.saved.platformStand
+		current.humanoid.AutoRotate = current.saved.autoRotate
+	end
+	local camera = workspace.CurrentCamera
+	if camera then
+		camera.CameraType = current.saved.cameraType
+		camera.FieldOfView = current.saved.fov
+		if current.saved.subject and current.saved.subject.Parent then
+			camera.CameraSubject = current.saved.subject
+		elseif humanoid and humanoid.Parent then
+			camera.CameraSubject = humanoid
 		end
 	end
-
-	local initOffset = Vector3.new(0, CONFIG.CameraHeight, 0) + lookXZ * (-CONFIG.CameraDistance)
-	flightState.camPos = hrp.Position + initOffset
-	camera.CameraType = Enum.CameraType.Scriptable
-	camera.FieldOfView = CONFIG.CameraFOV
-	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-	if gliderEquipEvent then gliderEquipEvent:FireServer(true, gliderName) end
-	print("[Glider] Deployed:", gliderName, "| deployY:", math.floor(flightState.deployY))
-
-	flightState.heartbeat = RunService.Heartbeat:Connect(function(dt)
-		if not flightState.active then return end
-		dt = math.min(dt, CONFIG.MaxDt)
-		local s = flightState.statsRef
-
-		-- Inputs
-		local mouseX = UserInputService:GetMouseDelta().X * (CONFIG.InvertMouse and -1 or 1)
-		local adInput = (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0)
-		              - (UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0)
-		local wsInput = (UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0)
-		              - (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
-
-		-- Yaw (turn) — TurnDecay gives the pendulum "swing back to neutral" feel
-		local rawYaw = adInput - mouseX * CONFIG.MouseSensitivity
-		local targetRate = rawYaw * s.TurnSpeed
-		local accel = (math.abs(rawYaw) > 0.01) and s.TurnAcceleration or s.TurnDecay
-		flightState.yawRate  += (targetRate - flightState.yawRate) * accel * dt
-		flightState.yawAngle += math.rad(flightState.yawRate) * dt
-
-		-- Forward lock — keep heading within ±MaxYawDeviation of the +Z corridor so the
-		-- treadmill always sees forward progress (|deviation| < 90° ⇒ Vz > 0).
-		if CONFIG.YawForwardLock then
-			local diff = flightState.yawAngle - CONFIG.ForwardYaw
-			diff = (diff + math.pi) % (2 * math.pi) - math.pi   -- wrap to [-π, π]
-			local maxDev = math.rad(CONFIG.MaxYawDeviation)
-			if math.abs(diff) > maxDev then
-				flightState.yawAngle = CONFIG.ForwardYaw + math.clamp(diff, -maxDev, maxDev)
-				flightState.yawRate  = 0                        -- stop pushing into the wall
-			end
-		end
-
-		-- Pitch
-		local pitchTarget
-		if wsInput > 0 then pitchTarget = s.PitchRange[2]
-		elseif wsInput < 0 then pitchTarget = s.PitchRange[1]
-		else pitchTarget = s.GlideAngle end
-		flightState.pitch += (pitchTarget - flightState.pitch) * s.PitchLerpFactor * dt
-
-		-- Roll (bank) — hard capped at ±40° so character can never roll inverted
-		local targetRoll = (flightState.yawRate / s.TurnSpeed) * s.RollMultiplier
-		flightState.roll += (targetRoll - flightState.roll) * s.RollLerpFactor * dt
-		flightState.roll = math.clamp(flightState.roll, -40, 40)
-
-		-- Orientation
-		-- VisualPitchOffset makes the character appear prone (parallel to glider wing).
-		-- Clamped at -82° so we stay clear of the ±90° gimbal-lock singularity
-		-- that caused the AlignOrientation to spin into a corkscrew.
-		local pitchRad = math.rad(flightState.pitch)
-		local rollRad  = math.rad(flightState.roll)
-		local visualPitchRad = math.max(
-			pitchRad + math.rad(CONFIG.VisualPitchOffset),
-			math.rad(-82)
-		)
-		flightState.ao.CFrame = CFrame.fromEulerAnglesYXZ(visualPitchRad, flightState.yawAngle, rollRad)
-
-		-- Velocity with air drag
-		-- Lerping toward the target instead of instantly setting it gives a
-		-- noticeable "pushing through air" sensation on direction changes.
-		local cosPitch = math.cos(pitchRad)
-		local speed    = s.MaxSpeed
-		local targetVx = -math.sin(flightState.yawAngle) * cosPitch * speed
-		local targetVz = -math.cos(flightState.yawAngle) * cosPitch * speed
-		flightState.currentVelX += (targetVx - flightState.currentVelX) * CONFIG.AirDrag * dt
-		flightState.currentVelZ += (targetVz - flightState.currentVelZ) * CONFIG.AirDrag * dt
-		-- Hard invariant: never travel backward down the corridor (away from the rings).
-		-- Lateral (yaw = ±90°) yields Vz = 0; anything that would push Vz negative is floored.
-		flightState.currentVelZ = math.max(flightState.currentVelZ, 0)
-
-		local vy = math.sin(pitchRad) * speed - CONFIG.SinkRate
-		if flightState.deployY and hrp.Position.Y >= flightState.deployY - 0.5 then
-			vy = math.min(vy, -0.5)
-		end
-		flightState.lv.VectorVelocity = Vector3.new(flightState.currentVelX, vy, flightState.currentVelZ)
-
-		-- Camera
-		local flatCF = CFrame.fromEulerAnglesYXZ(pitchRad * 0.25, flightState.yawAngle, 0)
-		local camOffset = flatCF * Vector3.new(0, CONFIG.CameraHeight, CONFIG.CameraDistance)
-		local targetCamPos = hrp.Position + camOffset
-		flightState.camPos += (targetCamPos - flightState.camPos) * CONFIG.CameraLerpFactor * dt
-		local fwdDir = Vector3.new(-math.sin(flightState.yawAngle), 0, -math.cos(flightState.yawAngle))
-		local lookTarget = hrp.Position + fwdDir * CONFIG.CameraLookAhead + Vector3.new(0, CONFIG.CameraLookHeight, 0)
-		camera.CFrame = CFrame.new(flightState.camPos, lookTarget)
-	end)
+	UserInputService.MouseBehavior = current.saved.mouseBehavior
+	UserInputService.MouseIconEnabled = current.saved.mouseIcon
+	reticle.Visible, status.Visible, controls.Visible = false, false, false
+	canDoubleJump = false
+	if notifyServer then equipEvent:FireServer(false, nil) end
+	print("[Flight] Thrusters disengaged")
 end
 
--- ─────────────────────────────────────────────────────────────────────────────
--- Character setup
--- ─────────────────────────────────────────────────────────────────────────────
-local function setupCharacter(char)
-	if flightState.active then
-		flightState.active = false; flightState.gliderName = nil
-		flightState.statsRef = nil; flightState.deployY = nil
-		if flightState.heartbeat then flightState.heartbeat:Disconnect(); flightState.heartbeat = nil end
-		endGliderPose()
-		flightState.att = nil; flightState.lv = nil; flightState.ao = nil
-		flightState.gliderModel = nil
-		camera.CameraType = Enum.CameraType.Custom
-		camera.FieldOfView = 70
+local function updateInput()
+	local current = flight
+	if not current then return end
+	local available = inputAvailable()
+	current.input.thrust = available and UserInputService:IsKeyDown(Enum.KeyCode.W)
+	current.input.brake = available and UserInputService:IsKeyDown(Enum.KeyCode.S)
+	reticle.Visible = available
+	if not available then
 		UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+		UserInputService.MouseIconEnabled = true
+		return
 	end
-	jumpCount = 0; canDoubleJump = false; hidePrompt()
-	character = char
-	humanoid  = char:WaitForChild("Humanoid")
-	hrp       = char:WaitForChild("HumanoidRootPart")
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	UserInputService.MouseIconEnabled = false
+	-- Delta is pixels SINCE THE LAST RENDER. Multiplying it by dt again makes
+	-- mouse sensitivity depend on frame rate. Only angular motion uses dt.
+	local delta = UserInputService:GetMouseDelta()
+	Dynamics.ApplyMouseDelta(current.input, config, delta.X, delta.Y)
+end
 
-	humanoid.StateChanged:Connect(function(_, newState)
-		if flightState.active then return end
-		if newState == Enum.HumanoidStateType.Jumping then
-			jumpCount = math.min(jumpCount + 1, 2)
-		elseif newState == Enum.HumanoidStateType.Freefall then
-			if jumpCount == 1 then canDoubleJump = true end
-		elseif newState == Enum.HumanoidStateType.Landed
-		    or newState == Enum.HumanoidStateType.Running
-		    or newState == Enum.HumanoidStateType.RunningNoPhysics then
-			jumpCount = 0; canDoubleJump = false; hidePrompt()
-		end
+local function updateCamera(dt)
+	local current = flight
+	local camera = workspace.CurrentCamera
+	if not current or not camera or not hrp then return end
+	dt = math.min(dt, config.MaxFrameDt)
+	local c = config.Camera
+	local aimAlpha = Dynamics.Alpha(c.AimResponse, dt)
+	current.cameraYaw += Dynamics.AngleDelta(current.input.yaw, current.cameraYaw) * aimAlpha
+	current.cameraPitch += (current.input.pitch * c.PitchWeight - current.cameraPitch) * aimAlpha
+	local aim = CFrame.fromEulerAnglesYXZ(current.cameraPitch, current.cameraYaw, 0)
+	local wanted = hrp.Position + aim:VectorToWorldSpace(Vector3.new(0, c.Height, c.Distance))
+	local candidate = current.cameraPosition:Lerp(wanted, Dynamics.Alpha(c.PositionResponse, dt))
+	local anchor = hrp.Position + Vector3.new(0, c.LookHeight, 0)
+	-- Resolve collision AFTER smoothing, so a lagging camera cannot stay in a wall.
+	local obstruction = workspace:Raycast(anchor, candidate - anchor, current.rayParams)
+	current.cameraPosition = obstruction
+		and (obstruction.Position + obstruction.Normal * c.CollisionPadding) or candidate
+	local lookAt = anchor + aim.LookVector * c.LookAhead
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = CFrame.lookAt(current.cameraPosition, lookAt, Vector3.yAxis)
+	camera.Focus = CFrame.new(lookAt)
+	local speed = hrp.AssemblyLinearVelocity.Magnitude
+	local ratio = math.clamp(speed / current.stats.MaxSpeed, 0, 1)
+	local targetFOV = c.FOV + c.SpeedFOV * ratio * ratio
+	camera.FieldOfView += (targetFOV - camera.FieldOfView) * Dynamics.Alpha(c.FOVResponse, dt)
+	local mode = current.input.brake and "AIRBRAKE" or current.input.thrust and "THRUST" or "COAST"
+	local fuelText = lastFuel and string.format("    FUEL %d", math.floor(lastFuel)) or ""
+	status.Text = string.format("%s    %d STUDS/S%s", mode, math.floor(speed), fuelText)
+end
+
+local function startFlight(name)
+	if flight then stopFlight(true); return end
+	if not canDeploy() then return end
+	local stats = GliderConfig.Gliders[name]
+	local camera = workspace.CurrentCamera
+	if not stats or not camera then return end
+	local actual = hrp.AssemblyLinearVelocity
+	local motion = Dynamics.New(config, actual.X, actual.Y, actual.Z)
+	local attachment = Instance.new("Attachment")
+	attachment.Name = "FlightAttachment"
+	attachment.Parent = hrp
+	local velocity = Instance.new("LinearVelocity")
+	velocity.Name = "FlightVelocity"
+	velocity.Attachment0 = attachment
+	velocity.RelativeTo = Enum.ActuatorRelativeTo.World
+	velocity.ForceLimitsEnabled = false
+	velocity.VectorVelocity = actual
+	velocity.Parent = hrp
+	local orientation = Instance.new("AlignOrientation")
+	orientation.Name = "FlightOrientation"
+	orientation.Attachment0 = attachment
+	orientation.Mode = Enum.OrientationAlignmentMode.OneAttachment
+	orientation.MaxTorque = math.huge
+	orientation.MaxAngularVelocity = config.MaxAngularVelocity
+	orientation.Responsiveness = config.OrientationResponse
+	orientation.CFrame = CFrame.fromEulerAnglesYXZ(math.rad(config.BodyLean), motion.yaw, 0)
+	orientation.Parent = hrp
+
+	local current = {
+		stats = stats, motion = motion, humanoid = humanoid, elapsed = 0,
+		input = { yaw = config.ForwardYaw, pitch = 0, thrust = false, brake = false },
+		attachment = attachment, velocity = velocity, orientation = orientation,
+		cameraYaw = config.ForwardYaw, cameraPitch = 0, cameraPosition = camera.CFrame.Position,
+		rayParams = rayParams(),
+		saved = {
+			cameraType = camera.CameraType, fov = camera.FieldOfView, subject = camera.CameraSubject,
+			mouseBehavior = UserInputService.MouseBehavior, mouseIcon = UserInputService.MouseIconEnabled,
+			autoRotate = humanoid.AutoRotate, platformStand = humanoid.PlatformStand,
+		},
+	}
+	current.presentation = Presentation.new(character, config)
+	flight = current
+	lastFuel = nil
+	humanoid.AutoRotate = false
+	humanoid.PlatformStand = true
+	camera.CameraType = Enum.CameraType.Scriptable
+	prompt.Visible = false
+	status.Visible, controls.Visible = true, true
+	UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
+	UserInputService.MouseIconEnabled = false
+	RunService:BindToRenderStep("GARFlightInput", Enum.RenderPriority.Input.Value + 1, updateInput)
+	RunService:BindToRenderStep("GARFlightCamera", Enum.RenderPriority.Camera.Value + 1, updateCamera)
+	-- Pose writes occur after Animator evaluation; velocity is ready for physics.
+	current.simulation = RunService.PreSimulation:Connect(function(dt)
+		if flight ~= current or not hrp or not hrp.Parent then return end
+		current.elapsed += dt
+		-- Read actual velocity so collisions affect momentum instead of carrying an
+		-- ever-growing desired velocity through a wall. No position writes.
+		local measured = hrp.AssemblyLinearVelocity
+		motion.vx, motion.vy, motion.vz = measured.X, measured.Y, measured.Z
+		Dynamics.Step(motion, current.input, stats, config, dt)
+		velocity.VectorVelocity = Vector3.new(motion.vx, motion.vy, motion.vz)
+		local lean = config.BodyLean + config.ThrustLean * motion.throttle
+		orientation.CFrame = CFrame.fromEulerAnglesYXZ(
+			math.rad(lean) + motion.pitch * config.BodyPitchWeight, motion.yaw, motion.bank)
+		current.presentation:Update(motion, current.elapsed)
 	end)
+	equipEvent:FireServer(true, name)
+	print("[Flight] Engaged:", name, "| hold W to thrust, release to coast")
+end
+
+local function setupCharacter(newCharacter)
+	stopFlight(true)
+	for _, connection in characterConnections do connection:Disconnect() end
+	table.clear(characterConnections)
+	character = newCharacter
+	humanoid = character:WaitForChild("Humanoid")
+	hrp = character:WaitForChild("HumanoidRootPart")
+	canDoubleJump = false
+	table.insert(characterConnections, humanoid.Died:Connect(function() stopFlight(true) end))
+	table.insert(characterConnections, humanoid.StateChanged:Connect(function(_, state)
+		if flight then return end
+		if state == Enum.HumanoidStateType.Freefall then
+			canDoubleJump = true
+		elseif state == Enum.HumanoidStateType.Landed then
+			canDoubleJump = false
+		end
+	end))
 end
 
 player.CharacterAdded:Connect(setupCharacter)
+player.CharacterRemoving:Connect(function()
+	stopFlight(true)
+	character, humanoid, hrp = nil, nil, nil
+end)
 if player.Character then task.defer(setupCharacter, player.Character) end
 
--- ─────────────────────────────────────────────────────────────────────────────
--- Input
--- ─────────────────────────────────────────────────────────────────────────────
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-	if gameProcessed then return end
-
-	if input.KeyCode == Enum.KeyCode.Space and canDoubleJump and not flightState.active and hrp then
+UserInputService.WindowFocusReleased:Connect(function() windowFocused = false end)
+UserInputService.WindowFocused:Connect(function() windowFocused = true end)
+UserInputService.InputBegan:Connect(function(input, processed)
+	if processed or not inputAvailable() then return end
+	if input.KeyCode == Enum.KeyCode.F then
+		startFlight("Beginner")
+	elseif input.KeyCode == Enum.KeyCode.E then
+		stopFlight(true)
+	elseif input.KeyCode == Enum.KeyCode.Space and canDoubleJump and not flight and hrp then
 		canDoubleJump = false
-		local vel = hrp.AssemblyLinearVelocity
-		hrp.AssemblyLinearVelocity = Vector3.new(vel.X, CONFIG.DoubleJumpPower, vel.Z)
-		task.spawn(function()
-			task.wait(0.08)
-			local apexWatcher
-			apexWatcher = RunService.Heartbeat:Connect(function()
-				if not hrp or flightState.active then apexWatcher:Disconnect(); return end
-				if hrp.AssemblyLinearVelocity.Y <= 0.5 then
-					apexWatcher:Disconnect()
-					tryShowPrompt()
-				end
-			end)
-			task.delay(4, function() pcall(function() apexWatcher:Disconnect() end) end)
-		end)
-	end
-
-	if input.KeyCode == Enum.KeyCode.F and promptVisible and not flightState.active then
-		hidePrompt(); startFlight("Beginner")
-	end
-	if input.KeyCode == Enum.KeyCode.E and flightState.active then
-		stopFlight()
+		local v = hrp.AssemblyLinearVelocity
+		hrp.AssemblyLinearVelocity = Vector3.new(v.X, config.DoubleJumpPower, v.Z)
 	end
 end)
 
-if hotbarActivateEvent then
-	hotbarActivateEvent.Event:Connect(function(data)
-		if not data or not data.InternalName then return end
-		if GliderConfig.Gliders[data.InternalName] then startFlight(data.InternalName) end
+fuelEvent.OnClientEvent:Connect(function(fuel)
+	if typeof(fuel) ~= "number" then return end
+	lastFuel = fuel
+	-- Server emits RunEnded/awards. Only remove local movers/camera here.
+	if flight and fuel <= 0 then stopFlight(false) end
+end)
+if hotbarEvent and hotbarEvent:IsA("BindableEvent") then
+	hotbarEvent.Event:Connect(function(data)
+		if type(data) == "table" and GliderConfig.Gliders[data.InternalName] then
+			startFlight(data.InternalName)
+		end
 	end)
 end
-
-print("[GliderController] READY — jump, double-jump, press F to deploy")
+RunService.Heartbeat:Connect(function(dt)
+	promptClock += dt
+	if promptClock < 0.1 then return end
+	promptClock = 0
+	prompt.Visible = not flight and inputAvailable() and canDeploy()
+end)
+script.Destroying:Connect(function()
+	stopFlight(true)
+	gui:Destroy()
+end)
+print("[Flight] Ready: jump, F to engage | mouse aims | W thrust | S brake | E end run")
