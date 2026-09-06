@@ -22,7 +22,7 @@
 - Rojo source-only build passed into a temporary file. Checked that client scripts appear beneath StarterPlayer and no root StarterPlayerScripts exists.
 - Source diff whitespace check passed.
 - Inspected the authored place and all three template floor sizes; checked synchronized editor and Source text.
-- The updated local Studio tab still needs Ctrl+S after synchronization before its script changes are captured in the binary place. The committed binary currently preserves the original handoff scene.
+- The user saved the synchronized local place before the movement session. Reopened Studio sources match the controller, atmosphere, config and ProcGen source lengths; both editor and Source properties agree. The saved binary is captured in the synchronization follow-up.
 - No flight/rendering playtest or economy/rejoin test was run. No LOD behavior is claimed verified.
 
 ## Open
