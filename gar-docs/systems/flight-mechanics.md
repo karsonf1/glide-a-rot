@@ -2,6 +2,8 @@
 
 # GAR Flight Mechanics
 
+**2026-09-06:** This implementation is being replaced by the [thruster flight prototype](../decisions/2026-09-06-thruster-flight-prototype.md). Mouse aims, W thrusts/release coasts, S brakes. The body leans moderately rather than lying prone, with procedural joint motion and a lower level-horizon camera. `FlightDynamics` owns pure numeric momentum; `GliderConfig.Flight` owns tuning. Compile/math checks pass, but Studio feel is not yet verified. The historical description below records the glider baseline.
+
 **Status:** ✅ built · `src/StarterPlayerScripts/Client.client.lua` + `src/ServerScriptService/GliderHandler.server.lua`
 
 ## Goal

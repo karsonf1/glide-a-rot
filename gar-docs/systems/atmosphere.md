@@ -2,6 +2,8 @@
 
 # GAR Atmosphere
 
+**2026-09-06 prototype:** Forest fog is reduced to Density 0.18 / Haze 0.75 / Offset 0.1 and profiles now live in `ReplicatedStorage/AtmosphereConfig.lua`. Needs Studio synchronization and a visual test. Prior values below are historical.
+
 **2026-09-05 verification:** the controller was absent from the actual StarterPlayerScripts because the Rojo mapping was wrong. Codex corrected the mapping and synchronized the script into the local Studio tab. The inherited haze values remain untested; they do not guarantee a particular visibility distance. Asset preloading is separate and now lives in `CorridorPreload.client.lua`.
 
 **Status:** ✅ built · `src/StarterPlayerScripts/AtmosphereController.client.lua`
